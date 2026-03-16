@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const dotenv = require('dotenv');
+const crypto = require('crypto');
 const path = require('path');
 
 // Load env FIRST so Clerk picks up the secret key
@@ -27,6 +28,9 @@ const postRoutes = require('./routes/postRoutes');
 
 // Initialize Express app
 const app = express();
+
+// Render runs behind a reverse proxy; trust first proxy so req.ip and rate limits work correctly.
+app.set('trust proxy', 1);
 
 // ── Security headers ──────────────────────────────────────────────────────────
 app.use(helmet());
@@ -96,6 +100,26 @@ app.use('/api/posts', postRoutes);
 // Root route
 app.get('/', (req, res) => {
   res.send('Hey Students DU API is running');
+});
+
+// Public health endpoint for uptime monitors (returns minimal data only)
+app.get('/health', (req, res) => {
+  const dbConnected = mongoose.connection.readyState === 1;
+  const bucket = Math.floor(Date.now() / 60000); // rotates each minute
+  const salt = process.env.HEALTH_ROUTE_SALT || 'heystudents-health';
+  const beat = crypto
+    .createHash('sha256')
+    .update(`${salt}:${bucket}:${process.pid}`)
+    .digest('hex')
+    .slice(0, 20);
+
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.status(dbConnected ? 200 : 503).json({
+    ok: dbConnected,
+    service: 'heystudents-api',
+    beat,
+    ts: new Date().toISOString(),
+  });
 });
 
 // 🔁 Keep-alive ping route (for GitHub Actions or uptime pingers)
