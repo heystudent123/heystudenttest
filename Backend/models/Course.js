@@ -71,11 +71,11 @@ const CourseSchema = new mongoose.Schema({
       default: 'file'
     },
     // For uploaded files
-    fileUrl: String,
     fileType: {
       type: String,
       enum: ['pdf', 'document', 'image', 'video', 'other']
     },
+    fileExtension: String,
     cloudinaryPublicId: String,
     // For video links (YouTube, Vimeo, etc.)
     videoUrl: String,

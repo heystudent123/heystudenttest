@@ -25,6 +25,7 @@ const videoRoutes = require('./routes/videoRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const enrollmentRoutes = require('./routes/enrollmentRoutes');
 const postRoutes = require('./routes/postRoutes');
+const materialRoutes = require('./routes/materialRoutes');
 
 // Initialize Express app
 const app = express();
@@ -96,6 +97,7 @@ app.use('/api/videos', videoRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/enrollments', enrollmentRoutes);
 app.use('/api/posts', postRoutes);
+app.use('/api/materials', materialRoutes);
 
 // Root route
 app.get('/', (req, res) => {

@@ -1,6 +1,23 @@
 const Course = require('../models/Course');
 const ErrorResponse = require('../utils/errorResponse');
 const { deleteFile } = require('../utils/courseUpload');
+const path = require('path');
+
+const sanitizeMaterialForPublic = (material) => ({
+  _id: material._id,
+  title: material.title,
+  materialType: material.materialType,
+});
+
+const sanitizeCourseForPublic = (course) => {
+  const raw = course.toObject ? course.toObject() : course;
+  return {
+    ...raw,
+    materials: Array.isArray(raw.materials)
+      ? raw.materials.map(sanitizeMaterialForPublic)
+      : [],
+  };
+};
 
 // @desc    Get all courses
 // @route   GET /api/courses
@@ -53,6 +70,7 @@ exports.getCourses = async (req, res, next) => {
     
     // Executing query
     const courses = await query;
+    const sanitizedCourses = courses.map(sanitizeCourseForPublic);
     
     // Pagination result
     const pagination = {};
@@ -73,10 +91,10 @@ exports.getCourses = async (req, res, next) => {
     
     res.status(200).json({
       success: true,
-      count: courses.length,
+      count: sanitizedCourses.length,
       total,
       pagination,
-      data: courses
+      data: sanitizedCourses
     });
   } catch (err) {
     next(err);
@@ -96,7 +114,7 @@ exports.getCourseById = async (req, res, next) => {
     
     res.status(200).json({
       success: true,
-      data: course
+      data: sanitizeCourseForPublic(course)
     });
   } catch (err) {
     next(err);
@@ -188,11 +206,12 @@ exports.deleteCourse = async (req, res, next) => {
 exports.getCoursesByCategory = async (req, res, next) => {
   try {
     const courses = await Course.find({ category: req.params.category, isActive: true });
+    const sanitizedCourses = courses.map(sanitizeCourseForPublic);
     
     res.status(200).json({
       success: true,
-      count: courses.length,
-      data: courses
+      count: sanitizedCourses.length,
+      data: sanitizedCourses
     });
   } catch (err) {
     next(err);
@@ -235,13 +254,15 @@ exports.uploadCourseMaterial = async (req, res, next) => {
       materialType = 'file';
     }
     
-    // Add material to course
+    const fileExtension = path.extname(req.file.originalname || '').replace('.', '').toLowerCase();
+
+    // Add material to course (store Cloudinary public ID only, never a permanent URL)
     const material = {
       title: req.body.title || req.file.originalname,
       description: req.body.description || '',
       materialType: materialType,
-      fileUrl: req.file.path,
       fileType: fileType,
+      fileExtension,
       cloudinaryPublicId: req.file.filename,
       order: req.body.order || course.materials.length
     };

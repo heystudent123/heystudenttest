@@ -29,6 +29,7 @@ const courseStorage = new CloudinaryStorage({
     return {
       folder: folder,
       resource_type: 'auto', // Automatically detect resource type (image, video, raw for PDFs/docs)
+      type: 'private', // Store paid materials as private assets
       public_id: `${Date.now()}-${file.originalname.replace(/\s+/g, '-').replace(/\.[^/.]+$/, '')}`,
       // Allow all file formats
       allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'txt', 'zip', 'rar'],
@@ -70,15 +71,18 @@ const deleteFile = async (publicId) => {
   try {
     // Try deleting as different resource types
     const resourceTypes = ['image', 'raw', 'video'];
+    const deliveryTypes = ['private', 'upload'];
     
     for (const resourceType of resourceTypes) {
-      try {
-        const result = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
-        if (result.result === 'ok') {
-          return result;
+      for (const type of deliveryTypes) {
+        try {
+          const result = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType, type });
+          if (result.result === 'ok') {
+            return result;
+          }
+        } catch (err) {
+          continue;
         }
-      } catch (err) {
-        continue;
       }
     }
     
