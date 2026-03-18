@@ -186,13 +186,20 @@ exports.promoteToInstitute = async (req, res, next) => {
       return next(new ErrorResponse('User is already an institute', 400));
     }
     
-    // Generate a unique 6-digit alphanumeric referral code
+    // Generate a unique 6-character alphanumeric referral code
     let referralCode = '';
     let isUnique = false;
+    const customCodeInput = typeof req.body?.customReferralCode === 'string'
+      ? sanitizeStr(req.body.customReferralCode).toUpperCase()
+      : '';
     
     // Use custom referral code if provided, otherwise generate one
-    if (req.body.customReferralCode && req.body.customReferralCode.length >= 4) {
-      referralCode = req.body.customReferralCode.toUpperCase();
+    if (customCodeInput) {
+      if (!/^[A-Z0-9]{4,12}$/.test(customCodeInput)) {
+        return next(new ErrorResponse('Custom referral code must be 4-12 characters using only letters and numbers', 400));
+      }
+
+      referralCode = customCodeInput;
       
       // Check if custom code is already in use
       const existingUser = await EmailUser.findOne({ referralCode });
@@ -219,23 +226,41 @@ exports.promoteToInstitute = async (req, res, next) => {
       }
     }
     
-    // Update user to institute role with referral code
-    user.role = 'institute';
-    user.referralCode = referralCode;
-    await user.save();
+    // Update only targeted fields to avoid full-document validation failures on legacy records
+    const updatedUser = await EmailUser.findByIdAndUpdate(
+      user._id,
+      {
+        $set: {
+          role: 'institute',
+          referralCode
+        }
+      },
+      {
+        new: true,
+        runValidators: false,
+        context: 'query'
+      }
+    );
+
+    if (!updatedUser) {
+      return next(new ErrorResponse(`User not found with id of ${req.params.id}`, 404));
+    }
     
     res.status(200).json({
       success: true,
       data: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        referralCode: user.referralCode
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        role: updatedUser.role,
+        referralCode: updatedUser.referralCode
       }
     });
   } catch (err) {
+    if (err.code === 11000 && err.keyValue?.referralCode) {
+      return next(new ErrorResponse('Referral code is already in use, please retry', 400));
+    }
     next(err);
   }
 };
