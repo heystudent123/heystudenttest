@@ -95,8 +95,7 @@ const StudentDashboardPage: React.FC = () => {
   const [postsLoading, setPostsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Profile completion modal
-  const [showProfileModal, setShowProfileModal] = useState(false);
+  // Profile completion fields
   const [profileName, setProfileName] = useState('');
   const [profileCity, setProfileCity] = useState('');
   const [profileWhatsapp, setProfileWhatsapp] = useState('');
@@ -151,19 +150,6 @@ const StudentDashboardPage: React.FC = () => {
     checkEnrollmentAndFetch();
   }, [authLoading, user, isSignedIn, checkEnrollmentAndFetch, navigate]);
 
-  // Show profile modal once enrollment confirmed and profile is incomplete
-  useEffect(() => {
-    if (!enrollmentChecked || !isEnrolled || !user) return;
-    const needsProfile = !user.name || !user.city || !user.whatsapp;
-    if (needsProfile) {
-      setProfileName(user.name || '');
-      setProfileCity(user.city || '');
-      setProfileWhatsapp(user.whatsapp || '');
-      setShowProfileModal(true);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enrollmentChecked, isEnrolled, user?.name, user?.city, user?.whatsapp]);
-
   const handleSaveProfile = async () => {
     if (!profileName.trim()) { setProfileError('Please enter your full name.'); return; }
     if (!profileCity.trim()) { setProfileError('Please enter your city.'); return; }
@@ -172,7 +158,7 @@ const StudentDashboardPage: React.FC = () => {
     setProfileError('');
     try {
       await updateUserProfile({ name: profileName.trim(), city: profileCity.trim(), whatsapp: profileWhatsapp.trim() });
-      setShowProfileModal(false);
+      // No need to close modal—profile gate will auto-dismiss when user state updates
     } catch {
       setProfileError('Failed to save. Please try again.');
     } finally {
@@ -202,70 +188,76 @@ const StudentDashboardPage: React.FC = () => {
 
   if (!isEnrolled) return null;
 
+  // Strict gate: if profile incomplete, block dashboard access entirely
+  const profileIncomplete = !user?.name || !user?.city || !user?.whatsapp;
+  if (profileIncomplete && enrollmentChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#fff9ed' }}>
+        <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full mx-4">
+          <h2 className="text-2xl font-extrabold text-black mb-1">Complete Your Profile</h2>
+          <p className="text-neutral-500 text-sm mb-6">
+            You need to fill in a few details to access your dashboard. This takes less than a minute.
+          </p>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-neutral-700 mb-1">Full Name *</label>
+              <input
+                type="text"
+                value={profileName}
+                onChange={e => setProfileName(e.target.value)}
+                placeholder="Your full name"
+                className="w-full border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-neutral-700 mb-1">City *</label>
+              <input
+                type="text"
+                value={profileCity}
+                onChange={e => setProfileCity(e.target.value)}
+                placeholder="e.g. Delhi, Mumbai"
+                className="w-full border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-neutral-700 mb-1">WhatsApp Number *</label>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={profileWhatsapp}
+                onChange={e => setProfileWhatsapp(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                onPaste={e => {
+                  e.preventDefault();
+                  const paste = (e.clipboardData || (window as any).clipboardData).getData('text') || '';
+                  setProfileWhatsapp(paste.replace(/\D/g, '').slice(0, 10));
+                }}
+                maxLength={10}
+                placeholder="10-digit mobile number"
+                className="w-full border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+            </div>
+            {profileError && <p className="text-red-500 text-sm">{profileError}</p>}
+          </div>
+          <button
+            onClick={handleSaveProfile}
+            disabled={profileSaving}
+            className="mt-6 w-full bg-amber-400 hover:bg-amber-300 disabled:bg-amber-200 text-black font-bold py-3 rounded-xl transition-colors"
+          >
+            {profileSaving ? 'Saving…' : 'Continue to Dashboard →'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const firstName = user?.name ? user.name.split(' ')[0] : '';
 
   /* ── Page ──────────────────────────────────────────────────────────────── */
   return (
     <div className="min-h-screen" style={{ background: '#fff9ed' }}>
 
-      {/* ── Profile Completion Modal (blocking) ─────────────────────────── */}
-      {showProfileModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
-            <h2 className="text-2xl font-extrabold text-black mb-1">Complete Your Profile</h2>
-            <p className="text-neutral-500 text-sm mb-6">
-              Welcome! Please fill in a few quick details so we can personalise your experience.
-            </p>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">Full Name *</label>
-                <input
-                  type="text"
-                  value={profileName}
-                  onChange={e => setProfileName(e.target.value)}
-                  placeholder="Your full name"
-                  className="w-full border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">City *</label>
-                <input
-                  type="text"
-                  value={profileCity}
-                  onChange={e => setProfileCity(e.target.value)}
-                  placeholder="e.g. Delhi, Mumbai"
-                  className="w-full border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">WhatsApp Number *</label>
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  value={profileWhatsapp}
-                  onChange={e => setProfileWhatsapp(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  onPaste={e => {
-                    e.preventDefault();
-                    const paste = (e.clipboardData || (window as any).clipboardData).getData('text') || '';
-                    setProfileWhatsapp(paste.replace(/\D/g, '').slice(0, 10));
-                  }}
-                  maxLength={10}
-                  placeholder="10-digit mobile number"
-                  className="w-full border border-neutral-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-              </div>
-              {profileError && <p className="text-red-500 text-sm">{profileError}</p>}
-            </div>
-            <button
-              onClick={handleSaveProfile}
-              disabled={profileSaving}
-              className="mt-6 w-full bg-amber-400 hover:bg-amber-300 disabled:bg-amber-200 text-black font-bold py-3 rounded-xl transition-colors"
-            >
-              {profileSaving ? 'Saving…' : 'Save & Continue →'}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* ── Profile Modal removed: now a strict gate above ─────────────────── */}
+
 
       {/* Hero keyframes */}
       <style>{`
