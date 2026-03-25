@@ -5,6 +5,7 @@ const Enrollment = require('../models/Enrollment');
 const ErrorResponse = require('../utils/errorResponse');
 const EmailUser = require('../models/EmailUser');
 const Course = require('../models/Course');
+const Referral = require('../models/Referral');
 const PrePaymentLead = require('../models/PrePaymentLead');
 const { sanitizeStr, isPositiveNumber, isNonEmpty } = require('../middleware/validate');
 
@@ -44,6 +45,65 @@ const verifyWebhookSignature = (rawBody, signature) => {
     .update(rawBody)
     .digest('hex');
   return expected === signature;
+};
+
+/**
+ * Persist referral attribution on user records after a successful payment.
+ * Institute dashboard reads EmailUser.referrerCodeUsed, so we sync it here.
+ */
+const applyReferralAttributionForPayment = async (payment) => {
+  if (!payment || !payment.userId) return;
+
+  const notesObj = payment.notes instanceof Map
+    ? Object.fromEntries(payment.notes)
+    : (payment.notes && typeof payment.notes === 'object' ? payment.notes : {});
+
+  const cleanReferralCode = notesObj?.referralCode
+    ? sanitizeStr(String(notesObj.referralCode)).toUpperCase()
+    : '';
+
+  if (!cleanReferralCode) return;
+
+  const [buyer, referrer] = await Promise.all([
+    EmailUser.findById(payment.userId),
+    EmailUser.findOne({ referralCode: cleanReferralCode, role: 'institute' })
+  ]);
+
+  if (!buyer || !referrer) return;
+
+  let buyerUpdated = false;
+  if (!buyer.referrerCodeUsed) {
+    buyer.referrerCodeUsed = cleanReferralCode;
+    buyerUpdated = true;
+  }
+  if (!buyer.referredBy) {
+    buyer.referredBy = referrer._id;
+    buyerUpdated = true;
+  }
+  if (buyerUpdated) {
+    await buyer.save();
+  }
+
+  const alreadyTracked = Array.isArray(referrer.referrals)
+    && referrer.referrals.some((id) => id.toString() === buyer._id.toString());
+
+  if (!alreadyTracked) {
+    referrer.referrals.push(buyer._id);
+    await referrer.save();
+  }
+
+  await Referral.updateOne(
+    { referrer: referrer._id, referred: buyer._id },
+    {
+      $setOnInsert: {
+        referrer: referrer._id,
+        referred: buyer._id,
+        referralCode: cleanReferralCode,
+        status: 'converted',
+      }
+    },
+    { upsert: true }
+  );
 };
 
 // ─── Controllers ──────────────────────────────────────────────────────────────
@@ -194,6 +254,8 @@ exports.verifyPayment = async (req, res, next) => {
     payment.paidAt = new Date();
     await payment.save();
 
+    await applyReferralAttributionForPayment(payment);
+
     // Auto-enroll if this was a course enrollment payment
     let enrollment = null;
     if (payment.purpose === 'course_enrollment') {
@@ -257,6 +319,7 @@ exports.handleWebhook = async (req, res) => {
           payment.webhookVerified = true;
           payment.webhookEvent = eventType;
           await payment.save();
+          await applyReferralAttributionForPayment(payment);
         }
         break;
       }
@@ -287,6 +350,7 @@ exports.handleWebhook = async (req, res) => {
           payment.webhookVerified = true;
           payment.webhookEvent = eventType;
           await payment.save();
+          await applyReferralAttributionForPayment(payment);
         }
         break;
       }

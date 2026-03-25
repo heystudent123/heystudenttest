@@ -193,6 +193,7 @@ export const coursesApi = {
 // =================== AUTH API ===================
 export interface AuthApi {
   syncUser: (userData: { clerkId: string; email: string; name: string; phone?: string }) => Promise<any>;
+  getMe: () => Promise<any>;
   login: (email: string, password: string) => Promise<any>;
   register: (userData: {
     name: string;
@@ -246,6 +247,16 @@ export const authApi: AuthApi = {
       return response.data;
     } catch (error) {
       console.error('Sync user error:', error);
+      throw error;
+    }
+  },
+
+  getMe: async () => {
+    try {
+      const response = await api.get('/email-users/me');
+      return response.data;
+    } catch (error) {
+      console.error('Get me error:', error);
       throw error;
     }
   },

@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { getAuth, clerkClient } = require('@clerk/express');
+const { getAuth, clerkClient, verifyToken } = require('@clerk/express');
 const EmailUser = require('../models/EmailUser');
 
 // Try to verify as a regular JWT (used by admin login)
@@ -13,6 +13,50 @@ const tryJwtVerify = async (token) => {
   return null;
 };
 
+// Verify Clerk Bearer token directly (helps local/dev cross-origin API calls).
+const tryClerkTokenVerify = async (token) => {
+  try {
+    if (!token || !process.env.CLERK_SECRET_KEY) return null;
+
+    const verified = await verifyToken(token, {
+      secretKey: process.env.CLERK_SECRET_KEY,
+    });
+
+    const clerkId = verified?.sub;
+    if (!clerkId) return null;
+
+    let user = await EmailUser.findOne({ clerkId });
+    if (user) return user;
+
+    const clerkUser = await clerkClient.users.getUser(clerkId);
+    const email = clerkUser.emailAddresses?.[0]?.emailAddress;
+    const name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || (email ? email.split('@')[0] : 'Student');
+    const phone = clerkUser.phoneNumbers?.[0]?.phoneNumber || '';
+
+    if (!email) return null;
+
+    user = await EmailUser.findOne({ email });
+    if (user) {
+      // Avoid full-document validation failures on legacy records.
+      user = await EmailUser.findByIdAndUpdate(
+        user._id,
+        { $set: { clerkId } },
+        { new: true, runValidators: false, context: 'query' }
+      );
+      return user;
+    }
+
+    return await EmailUser.create({
+      clerkId,
+      email,
+      name,
+      phone,
+    });
+  } catch {
+    return null;
+  }
+};
+
 // Protect routes — supports both Clerk sessions and admin JWT tokens
 exports.protect = async (req, res, next) => {
   // ── 1. If a Bearer token is present, try JWT first (admin login path) ──────
@@ -24,7 +68,14 @@ exports.protect = async (req, res, next) => {
       req.user = jwtUser;
       return next();
     }
-    // Bearer token present but JWT invalid — still try Clerk below (Clerk tokens can also be Bearer)
+
+    // Fallback: verify Clerk token directly from Authorization header.
+    const clerkBearerUser = await tryClerkTokenVerify(token).catch(() => null);
+    if (clerkBearerUser) {
+      req.user = clerkBearerUser;
+      return next();
+    }
+    // Bearer token present but could not be verified — still try Clerk session below.
   }
 
   // ── 2. Try Clerk session (set by clerkMiddleware in server.js) ────────────
@@ -43,8 +94,11 @@ exports.protect = async (req, res, next) => {
         }
         req.user = await EmailUser.findOne({ email });
         if (req.user) {
-          req.user.clerkId = userId;
-          await req.user.save();
+          req.user = await EmailUser.findByIdAndUpdate(
+            req.user._id,
+            { $set: { clerkId: userId } },
+            { new: true, runValidators: false, context: 'query' }
+          );
         } else {
           try {
             req.user = await EmailUser.create({

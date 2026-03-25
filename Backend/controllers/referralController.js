@@ -1,5 +1,6 @@
 const EmailUser = require('../models/EmailUser');
 const Referral = require('../models/Referral');
+const Payment = require('../models/Payment');
 const ErrorResponse = require('../utils/errorResponse');
 
 // @desc    Validate referral code
@@ -71,7 +72,47 @@ exports.getReferredUsers = async (req, res, next) => {
     const limitNum = parseInt(limit, 10) || 10;
     const skip = (pageNum - 1) * limitNum;
 
-    const filter = { referrerCodeUsed: me.referralCode };
+    const normalizedCode = String(me.referralCode || '').trim();
+
+    // Primary source: explicit user attribution.
+    const directUserIds = await EmailUser.find({ referrerCodeUsed: normalizedCode })
+      .select('_id')
+      .lean();
+
+    // Fallback source: historical paid payments carrying referralCode in notes.
+    // Keep this fault-tolerant so payment query issues never break institute dashboard.
+    let paymentUserIds = [];
+    try {
+      const fromNotes = await Payment.find({
+        status: 'paid',
+        'notes.referralCode': normalizedCode,
+      }).distinct('userId');
+      paymentUserIds = Array.isArray(fromNotes) ? fromNotes : [];
+    } catch (paymentErr) {
+      console.warn('Referral fallback query failed:', paymentErr.message);
+      paymentUserIds = [];
+    }
+
+    const mergedIds = Array.from(new Set([
+      ...directUserIds
+        .map((u) => u?._id)
+        .filter(Boolean)
+        .map((id) => id.toString()),
+      ...paymentUserIds
+        .filter(Boolean)
+        .map((id) => id.toString()),
+    ]));
+
+    if (!mergedIds.length) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        pagination: {},
+        data: []
+      });
+    }
+
+    const filter = { _id: { $in: mergedIds } };
     if (phone) {
       filter.phone = { $regex: phone, $options: 'i' };
     }

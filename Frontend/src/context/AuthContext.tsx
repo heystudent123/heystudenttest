@@ -69,13 +69,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('user', JSON.stringify(backendUser));
     } catch (error) {
       console.error('Error syncing user with backend:', error);
-      // If sync fails, try to use cached user data
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          setUser(JSON.parse(storedUser));
-        } catch (e) {
-          console.error('Error parsing stored user:', e);
+      // Fallback to /me so role and profile data stay current for navbar/guards.
+      try {
+        const meResponse = await authApi.getMe();
+        const meUser = meResponse.data;
+        setUser(meUser);
+        localStorage.setItem('user', JSON.stringify(meUser));
+      } catch {
+        // If both requests fail, try cached user data as last resort.
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          try {
+            setUser(JSON.parse(storedUser));
+          } catch (e) {
+            console.error('Error parsing stored user:', e);
+          }
         }
       }
     } finally {

@@ -21,20 +21,29 @@ exports.syncUser = async (req, res, next) => {
     }
 
     if (user) {
-      // Update existing user with Clerk ID if not set
-      if (!user.clerkId) {
-        user.clerkId = clerkId;
+      // Update only targeted fields to avoid full-document validation failures on legacy records.
+      const updates = {};
+      const cleanName = typeof name === 'string' ? name.trim() : '';
+      const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
+
+      if (!user.clerkId) updates.clerkId = clerkId;
+      if (cleanName && !user.name) updates.name = cleanName;
+      if (cleanPhone) updates.phone = cleanPhone;
+
+      if (Object.keys(updates).length) {
+        user = await EmailUser.findByIdAndUpdate(
+          user._id,
+          { $set: updates },
+          { new: true, runValidators: false, context: 'query' }
+        );
       }
-      if (name && !user.name) user.name = name;
-      if (phone) user.phone = phone;
-      await user.save();
     } else {
       // Create new user
       user = await EmailUser.create({
         clerkId,
         email,
-        name: name || '',
-        phone: phone || ''
+        name: (typeof name === 'string' && name.trim()) ? name.trim() : email.split('@')[0],
+        phone: typeof phone === 'string' ? phone.trim() : ''
       });
     }
 
