@@ -75,6 +75,7 @@ exports.updateProfile = async (req, res, next) => {
   try {
     const {
       name,
+      fullName,
       phone,
       college,
       course,
@@ -90,15 +91,32 @@ exports.updateProfile = async (req, res, next) => {
       return next(new ErrorResponse('User not found', 404));
     }
 
+    // Normalize incoming values so legacy/partial payloads don't trigger schema crashes.
+    const normalizedName = typeof name === 'string'
+      ? name.trim()
+      : (typeof fullName === 'string' ? fullName.trim() : '');
+    const normalizedPhone = typeof phone === 'string' ? phone.trim() : undefined;
+    const normalizedCollege = typeof college === 'string' ? college.trim() : undefined;
+    const normalizedCourse = typeof course === 'string' ? course.trim() : undefined;
+    const normalizedYear = typeof year === 'string' ? year.trim() : undefined;
+    const normalizedAddress = typeof address === 'string' ? address.trim() : undefined;
+    const normalizedCity = typeof city === 'string' ? city.trim() : undefined;
+    const normalizedWhatsapp = typeof whatsapp === 'string' ? whatsapp.trim() : undefined;
+
+    // If record has no name, require it from payload and return a clean 400 (not 500).
+    if (!user.name && !normalizedName) {
+      return next(new ErrorResponse('Please add your full name', 400));
+    }
+
     // Update fields
-    if (name) user.name = name;
-    if (phone) user.phone = phone;
-    if (college) user.college = college;
-    if (course) user.course = course;
-    if (year) user.year = year;
-    if (address) user.address = address;
-    if (city) user.city = city;
-    if (whatsapp) user.whatsapp = whatsapp;
+    if (normalizedName) user.name = normalizedName;
+    if (normalizedPhone !== undefined) user.phone = normalizedPhone;
+    if (normalizedCollege !== undefined) user.college = normalizedCollege;
+    if (normalizedCourse !== undefined) user.course = normalizedCourse;
+    if (normalizedYear !== undefined) user.year = normalizedYear;
+    if (normalizedAddress !== undefined) user.address = normalizedAddress;
+    if (normalizedCity !== undefined) user.city = normalizedCity;
+    if (normalizedWhatsapp !== undefined) user.whatsapp = normalizedWhatsapp;
 
     // Mark profile as completed if key fields are filled
     if (user.name && user.city && user.whatsapp) {
@@ -112,6 +130,11 @@ exports.updateProfile = async (req, res, next) => {
       data: user
     });
   } catch (err) {
+    if (err.name === 'ValidationError') {
+      const firstError = Object.values(err.errors || {})[0];
+      const message = firstError?.message || 'Invalid profile data';
+      return next(new ErrorResponse(message, 400));
+    }
     next(err);
   }
 };
