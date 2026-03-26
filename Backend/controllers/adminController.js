@@ -2,6 +2,7 @@ const EmailUser = require('../models/EmailUser');
 const Alumni = require('../models/Alumni');
 const Accommodation = require('../models/Accommodation');
 const Referral = require('../models/Referral');
+const PrePaymentLead = require('../models/PrePaymentLead');
 const ErrorResponse = require('../utils/errorResponse');
 const { sanitizeStr, isValidEmail, isNonEmpty } = require('../middleware/validate');
 
@@ -348,15 +349,64 @@ exports.getUsersByReferralCode = async (req, res, next) => {
       return next(new ErrorResponse('Institute not found with this referral code', 404));
     }
     
-    // Find all users who used this referral code
+    // Find all users who used this referral code.
+    // Include both `collegeYear` (legacy) and `year` (current schema).
     const users = await EmailUser.find({ referrerCodeUsed: referralCode })
-      .select('name email phone college collegeYear createdAt');
+      .select('name email phone college collegeYear year createdAt')
+      .lean();
+
+    // Enrich missing fields from pre-payment leads (real captured checkout data).
+    const userIds = users.map((u) => u._id).filter(Boolean);
+    const emails = users.map((u) => (u.email || '').toLowerCase()).filter(Boolean);
+
+    let leads = [];
+    if (userIds.length || emails.length) {
+      const or = [];
+      if (userIds.length) or.push({ userId: { $in: userIds } });
+      if (emails.length) or.push({ email: { $in: emails } });
+
+      leads = await PrePaymentLead.find({
+        referralCode,
+        ...(or.length ? { $or: or } : {}),
+      })
+        .select('userId email name phone college createdAt')
+        .sort({ createdAt: -1 })
+        .lean();
+    }
+
+    const leadByUserId = new Map();
+    const leadByEmail = new Map();
+    for (const lead of leads) {
+      const keyByUserId = lead.userId ? lead.userId.toString() : null;
+      const keyByEmail = lead.email ? lead.email.toLowerCase() : null;
+
+      if (keyByUserId && !leadByUserId.has(keyByUserId)) {
+        leadByUserId.set(keyByUserId, lead);
+      }
+      if (keyByEmail && !leadByEmail.has(keyByEmail)) {
+        leadByEmail.set(keyByEmail, lead);
+      }
+    }
+
+    const hydratedUsers = users.map((u) => {
+      const userKey = u._id ? u._id.toString() : '';
+      const emailKey = u.email ? u.email.toLowerCase() : '';
+      const lead = leadByUserId.get(userKey) || leadByEmail.get(emailKey);
+
+      return {
+        ...u,
+        name: u.name || lead?.name || '',
+        phone: u.phone || lead?.phone || '',
+        college: u.college || lead?.college || '',
+        collegeYear: u.collegeYear || u.year || '',
+      };
+    });
     
     res.status(200).json({
       success: true,
-      count: users.length,
+      count: hydratedUsers.length,
       institute,
-      data: users
+      data: hydratedUsers
     });
   } catch (err) {
     next(err);

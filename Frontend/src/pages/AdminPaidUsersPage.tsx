@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import SharedNavbar from '../components/SharedNavbar';
 import { authApi } from '../services/api';
 import * as XLSX from 'xlsx';
@@ -31,21 +30,10 @@ interface PaidUser {
 }
 
 const AdminPaidUsersPage: React.FC = () => {
-  const navigate = useNavigate();
   const [users, setUsers] = useState<PaidUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-
-  // Admin auth guard
-  useEffect(() => {
-    const stored = localStorage.getItem('user');
-    if (!stored) { navigate('/login'); return; }
-    try {
-      const u = JSON.parse(stored);
-      if (u.role !== 'admin') navigate('/');
-    } catch { navigate('/login'); }
-  }, [navigate]);
 
   useEffect(() => {
     fetchPaidUsers();
@@ -77,12 +65,11 @@ const AdminPaidUsersPage: React.FC = () => {
   });
 
   const exportExcel = () => {
+    // Prepare data for export - excluding sensitive PII (phone, whatsapp)
     const rows = filtered.map(u => ({
       Name: u.name,
       Email: u.email,
-      Phone: u.phone || '',
       City: u.city || '',
-      WhatsApp: u.whatsapp || '',
       College: u.college || '',
       'Total Paid (₹)': u.totalPaid,
       'Payments Count': u.payments.length,

@@ -1,7 +1,8 @@
 import React from 'react';
+import { CONTACT_PHONE_NUMBER } from '../config';
 
 const WhatsAppButton: React.FC = () => {
-  const phoneNumber = "6376908524"; // Format without + for WhatsApp API
+  const phoneNumber = CONTACT_PHONE_NUMBER; // Format without + for WhatsApp API
   const message = encodeURIComponent("Hey I want to enquire about the courses");
   const whatsappUrl = `https://wa.me/${phoneNumber}?text=${message}`;
   

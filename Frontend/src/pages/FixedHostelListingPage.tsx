@@ -273,7 +273,6 @@ const FixedHostelListingPage: React.FC = () => {
       try {
         setLoading(true);
         const rawData = await accommodationsApi.getAll();
-        console.log('Fetched accommodations raw data:', rawData);
         // Support different backend response shapes
         const list = Array.isArray(rawData)
           ? rawData
@@ -338,21 +337,6 @@ const FixedHostelListingPage: React.FC = () => {
         
         // Check vegOnly property directly on accommodation
         const directVegOnly = accom.vegOnly === true;
-        
-        // Debug logging to see what values we're working with
-        console.log('Accommodation food filter debug:', {
-          id: accom._id || accom.id,
-          name: accom.name,
-          features,
-          amenities: amenitiesList,
-          hasVegInFeatures,
-          hasNonVegInFeatures,
-          hasVegInAmenities,
-          hasNonVegInAmenities,
-          foodInfo,
-          isVegOnly,
-          directVegOnly
-        });
         
         if (foodTypeFilter === 'veg') {
           // For vegetarian, check all possible indicators

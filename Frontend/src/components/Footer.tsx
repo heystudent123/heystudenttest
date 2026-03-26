@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { CONTACT_PHONE_DISPLAY } from '../config';
 
 const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();
@@ -137,7 +138,7 @@ const Footer: React.FC = () => {
               </div>
               <div className="text-center md:text-left">
                 <h4 className="font-semibold text-white mb-1">Phone</h4>
-                <p className="text-neutral-300">+91 6376908524<br /></p>
+                <p className="text-neutral-300">{CONTACT_PHONE_DISPLAY}<br /></p>
               </div>
             </div>
           </div>

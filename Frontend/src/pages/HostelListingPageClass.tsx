@@ -193,7 +193,6 @@ class HostelListingPageClass extends Component<{}, State> {
   }
   
   render() {
-    console.log('Rendering HostelListingPageClass');
     const { filteredAccommodations, loading, error, sortBy } = this.state;
     const sortedAccommodations = this.sortAccommodations(filteredAccommodations);
     

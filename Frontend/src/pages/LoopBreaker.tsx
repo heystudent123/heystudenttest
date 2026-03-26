@@ -46,8 +46,6 @@ const LoopBreaker: React.FC = () => {
   
   // SOLUTION 1: Empty dependency array for one-time effects
   useEffect(() => {
-    console.log('This effect runs only once on mount');
-    
     // Proper cleanup to prevent memory leaks and updates after unmount
     return () => {
       isMounted.current = false;

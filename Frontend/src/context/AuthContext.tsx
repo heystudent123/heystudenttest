@@ -43,19 +43,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (!isSignedIn || !clerkUser) {
       setUser(null);
-      localStorage.removeItem('user');
-      localStorage.removeItem('token');
       setLoading(false);
       return;
     }
 
     try {
-      // Get Clerk session token to use as Bearer token
-      const token = await getToken();
-      if (token) {
-        localStorage.setItem('token', token);
-      }
-
       // Sync user with backend
       const response = await authApi.syncUser({
         clerkId: clerkUser.id,
@@ -66,7 +58,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const backendUser = response.data;
       setUser(backendUser);
-      localStorage.setItem('user', JSON.stringify(backendUser));
     } catch (error) {
       console.error('Error syncing user with backend:', error);
       // Fallback to /me so role and profile data stay current for navbar/guards.
@@ -74,22 +65,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const meResponse = await authApi.getMe();
         const meUser = meResponse.data;
         setUser(meUser);
-        localStorage.setItem('user', JSON.stringify(meUser));
       } catch {
-        // If both requests fail, try cached user data as last resort.
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          try {
-            setUser(JSON.parse(storedUser));
-          } catch (e) {
-            console.error('Error parsing stored user:', e);
-          }
-        }
+        // Do not trust cached localStorage user data for authorization decisions.
+        setUser(null);
       }
     } finally {
       setLoading(false);
     }
-  }, [isClerkLoaded, isSignedIn, clerkUser, getToken]);
+  }, [isClerkLoaded, isSignedIn, clerkUser]);
 
   useEffect(() => {
     syncUserWithBackend();
@@ -106,7 +89,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await authApi.updateProfile(user._id, profileData);
       
       const updatedUser = { ...user, ...response.data };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
       
       setUser(updatedUser);
       return updatedUser;

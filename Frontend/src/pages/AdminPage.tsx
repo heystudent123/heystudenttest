@@ -1,38 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import SharedNavbar from '../components/SharedNavbar';
-
-interface User {
-  _id: string;
-  name: string;
-  email: string;
-  role: string;
-}
+import { useAuth } from '../context/AuthContext';
 
 const AdminPage: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
+  const { user } = useAuth();
   const navigate = useNavigate();
 
-  // Authentication check
+  // Redirect unauthenticated users; role access is enforced by ProtectedRoute and backend.
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (!storedUser) {
-      navigate('/login');
-      return;
-    }
-
-    try {
-      const parsedUser = JSON.parse(storedUser);
-      if (parsedUser.role !== 'admin') {
-        navigate('/');
-        return;
-      }
-      setUser(parsedUser);
-    } catch (error) {
-      console.error('Error parsing user data:', error);
+    if (!user) {
       navigate('/login');
     }
-  }, [navigate]);
+  }, [navigate, user]);
 
   if (!user) {
     return (

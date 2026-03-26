@@ -10,6 +10,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL;
 // ✅ Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -21,19 +22,14 @@ export function setTokenGetter(fn: () => Promise<string | null>) {
   _tokenGetter = fn;
 }
 
-// ✅ Add token to requests — tries fresh Clerk token first, falls back to localStorage
+// ✅ Add token to requests from Clerk only (no token persistence in localStorage)
 api.interceptors.request.use(
   async (config) => {
     let token: string | null = null;
     if (_tokenGetter) {
       try { token = await _tokenGetter(); } catch {}
     }
-    if (!token) {
-      token = localStorage.getItem('token');
-    }
     if (token) {
-      // Always keep localStorage in sync with the latest token
-      localStorage.setItem('token', token);
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;

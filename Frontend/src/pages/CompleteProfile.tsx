@@ -191,8 +191,6 @@ const ProfilePage: React.FC = () => {
       const phoneDigitsOnly = formData.phone.replace(/\D/g, '');
       const last10Digits = phoneDigitsOnly.slice(-10);
 
-      console.log('Submitting profile with phone:', last10Digits);
-
       // Save user profile data to MongoDB
       const response = await authApi.completeProfile({
         uid: user?._id || '',

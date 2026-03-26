@@ -20,10 +20,7 @@ const PingPage: React.FC = () => {
   const sendPing = async () => {
     try {
       setPingStatus('idle');
-      console.log(`Sending ping request to server at: ${BASE_URL}/ping`);
       const response = await axios.get(`${BASE_URL}/ping`);
-      
-      console.log('Received pong response:', response.data);
       
       // Update ping history
       setPingHistory(prev => [

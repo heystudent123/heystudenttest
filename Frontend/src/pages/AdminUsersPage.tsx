@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { authApi } from '../services/api';
 import * as XLSX from 'xlsx';
 
@@ -32,28 +32,8 @@ const AdminUsersPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const usersPerPage = 10;
-  const navigate = useNavigate();
 
   useEffect(() => {
-    // Check if admin is logged in
-    const storedUser = localStorage.getItem('user');
-    if (!storedUser) {
-      navigate('/login');
-      return;
-    }
-
-    try {
-      const parsedUser = JSON.parse(storedUser);
-      if (parsedUser.role !== 'admin') {
-        navigate('/');
-        return;
-      }
-    } catch (error) {
-      console.error('Error parsing user data:', error);
-      navigate('/login');
-      return;
-    }
-
     // Function to fetch users with referral data
     const fetchUsersWithReferrals = async () => {
       try {
@@ -68,7 +48,7 @@ const AdminUsersPage: React.FC = () => {
     };
 
     fetchUsersWithReferrals();
-  }, [navigate]);
+  }, []);
 
   // Extract fetchUsersWithReferrals to be used in multiple places
   const fetchUsersWithReferrals = async () => {
@@ -167,11 +147,9 @@ const AdminUsersPage: React.FC = () => {
   
   // Function to export user data to Excel
   const exportToExcel = () => {
-    // Prepare data for export
+    // Prepare data for export - excluding sensitive PII (email, phone)
     const exportData = users.map(user => ({
       'Name': user.name,
-      'Email': user.email,
-      'Phone': user.phone,
       'Role': user.role,
       'College': user.college || '',
       'Course': user.course || '',

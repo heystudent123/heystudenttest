@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { authApi } from '../services/api';
 
 interface Institute {
@@ -31,28 +31,8 @@ const AdminInstitutesPage: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const navigate = useNavigate();
 
   useEffect(() => {
-    // Check if admin is logged in
-    const storedUser = localStorage.getItem('user');
-    if (!storedUser) {
-      navigate('/login');
-      return;
-    }
-
-    try {
-      const parsedUser = JSON.parse(storedUser);
-      if (parsedUser.role !== 'admin') {
-        navigate('/');
-        return;
-      }
-    } catch (error) {
-      console.error('Error parsing user data:', error);
-      navigate('/login');
-      return;
-    }
-
     // Function to fetch institutes with referral stats
     const fetchInstitutes = async () => {
       try {
@@ -67,7 +47,7 @@ const AdminInstitutesPage: React.FC = () => {
     };
 
     fetchInstitutes();
-  }, [navigate]);
+  }, []);
   
   // Function to fetch students by referral code
   const fetchStudentsByReferralCode = async (institute: Institute) => {

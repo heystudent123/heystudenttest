@@ -51,18 +51,6 @@ const emptyForm = {
 const AdminPostsPage: React.FC = () => {
   const navigate = useNavigate();
 
-  // Admin auth guard
-  useEffect(() => {
-    const stored = localStorage.getItem('user');
-    if (!stored) { navigate('/login'); return; }
-    try {
-      const u = JSON.parse(stored);
-      if (u.role !== 'admin') navigate('/');
-    } catch {
-      navigate('/login');
-    }
-  }, [navigate]);
-
   const [posts, setPosts] = useState<Post[]>([]);
   const [courses, setCourses] = useState<CourseOption[]>([]);
   const [loading, setLoading] = useState(true);

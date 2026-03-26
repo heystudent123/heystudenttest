@@ -1,16 +1,16 @@
-// Get token from local storage
+// Deprecated: tokens are no longer stored in browser storage.
 export const getToken = (): string | null => {
-  return localStorage.getItem('token');
+  return null;
 };
 
-// Set token in local storage
+// Deprecated no-op.
 export const setToken = (token: string): void => {
-  localStorage.setItem('token', token);
+  void token;
 };
 
-// Remove token from local storage
+// Deprecated no-op.
 export const removeToken = (): void => {
-  localStorage.removeItem('token');
+  return;
 };
 
 // Check if user is authenticated

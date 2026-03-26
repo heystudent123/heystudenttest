@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import SharedNavbar from '../components/SharedNavbar';
 import { paymentsApi } from '../services/api';
 import * as XLSX from 'xlsx';
@@ -45,21 +44,11 @@ const BADGE: Record<'converted' | 'popup' | 'form', { label: string; cls: string
 };
 
 const AdminPrePaymentLeadsPage: React.FC = () => {
-  const navigate = useNavigate();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<TabType>('all');
-
-  useEffect(() => {
-    const stored = localStorage.getItem('user');
-    if (!stored) { navigate('/login'); return; }
-    try {
-      const u = JSON.parse(stored);
-      if (u.role !== 'admin') navigate('/');
-    } catch { navigate('/login'); }
-  }, [navigate]);
 
   useEffect(() => { fetchLeads(); }, []);
 

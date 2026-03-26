@@ -58,12 +58,8 @@ const CoursesPage: React.FC = () => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Support both Clerk users and admin JWT users
-  const adminUser = (() => {
-    try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; }
-  })();
-  // effectiveUser is whoever is currently signed in (Clerk OR admin JWT)
-  const user = clerkUser || (localStorage.getItem('token') && adminUser ? adminUser : null);
+  // Use the authenticated backend user from AuthContext only.
+  const user = clerkUser;
 
   // Track which specific course IDs the user has already purchased
   const [isEnrolled, setIsEnrolled] = useState(false);
@@ -78,7 +74,7 @@ const CoursesPage: React.FC = () => {
     name: '',
     phone: '',
     email: '',
-    college: '',
+    stream: '',
     referralCode: '',
   });
   const [detailsErrors, setDetailsErrors] = useState<{ name?: string; phone?: string }>({});
@@ -266,7 +262,7 @@ const CoursesPage: React.FC = () => {
       name: (prefillUser as any)?.name || (prefillUser as any)?.fullName || '',
       phone: (prefillUser as any)?.phone || (prefillUser as any)?.whatsapp || '',
       email: (prefillUser as any)?.email || (prefillUser as any)?.primaryEmailAddress?.emailAddress || '',
-      college: (prefillUser as any)?.college || '',
+      stream: '',
       referralCode: '',
     });
     setDetailsErrors({});
@@ -291,7 +287,8 @@ const CoursesPage: React.FC = () => {
         name: studentDetails.name.trim(),
         phone: studentDetails.phone.trim(),
         email: studentDetails.email.trim() || undefined,
-        college: studentDetails.college.trim() || undefined,
+        // Keep backend compatibility: existing model uses `college`, we store selected stream there.
+        college: studentDetails.stream || undefined,
         courseId: pendingCourse?._id,
         courseTitle: pendingCourse?.title,
         source: 'enrollment_form',
@@ -402,16 +399,19 @@ const CoursesPage: React.FC = () => {
                 />
               </div>
 
-              {/* College */}
+              {/* Stream */}
               <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">College / School</label>
-                <input
-                  type="text"
-                  value={studentDetails.college}
-                  onChange={e => setStudentDetails(p => ({ ...p, college: e.target.value }))}
-                  placeholder="Your college or school name"
-                  className="w-full px-4 py-2.5 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-black text-sm"
-                />
+                <label className="block text-sm font-semibold text-neutral-700 mb-1">Stream</label>
+                <select
+                  value={studentDetails.stream}
+                  onChange={e => setStudentDetails(p => ({ ...p, stream: e.target.value }))}
+                  className="w-full px-4 py-2.5 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-black text-sm bg-white"
+                >
+                  <option value="">Select stream</option>
+                  <option value="Science">Science</option>
+                  <option value="Commerce">Commerce</option>
+                  <option value="Arts">Arts</option>
+                </select>
               </div>
 
               {/* Referral Code */}

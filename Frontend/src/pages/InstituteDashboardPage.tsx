@@ -104,11 +104,15 @@ const InstituteDashboardPage: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p className="text-gray-600">Name:</p>
-                  <p className="font-medium">{user.name}</p>
+                  <p className="font-medium">{user.name || user.email || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Email:</p>
+                  <p className="font-medium">{user.email || '-'}</p>
                 </div>
                 <div>
                   <p className="text-gray-600">Phone:</p>
-                  <p className="font-medium">{user.phone}</p>
+                  <p className="font-medium">{user.phone || '-'}</p>
                 </div>
                 <div>
                   <p className="text-gray-600">Referral Code:</p>
@@ -160,6 +164,7 @@ const InstituteDashboardPage: React.FC = () => {
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">College</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Year</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Joined Date</th>
@@ -168,8 +173,9 @@ const InstituteDashboardPage: React.FC = () => {
                   <tbody className="divide-y divide-gray-200">
                     {referredUsers.map((user) => (
                       <tr key={user._id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.name}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.phone}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.name || user.email || '-'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.phone || '-'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email || '-'}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.college || '-'}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.year || '-'}</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

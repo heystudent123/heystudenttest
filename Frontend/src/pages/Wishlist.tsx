@@ -42,7 +42,6 @@ const Wishlist: React.FC = () => {
       try {
         setLoading(true);
         const data = await getWishlist();
-        console.log('Wishlist data:', data.data); // Temporary log
         setWishlistItems(data.data || []);
         setError(null);
       } catch (err: any) {

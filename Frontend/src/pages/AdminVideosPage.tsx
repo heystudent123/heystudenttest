@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import * as tus from 'tus-js-client';
 import SharedNavbar from '../components/SharedNavbar';
 import { videosApi } from '../services/api';
@@ -39,7 +39,6 @@ const formatDuration = (seconds: number): string => {
 };
 
 const AdminVideosPage: React.FC = () => {
-  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [videos, setVideos] = useState<Video[]>([]);
@@ -75,18 +74,6 @@ const AdminVideosPage: React.FC = () => {
 
   // Status polling
   const [checkingStatus, setCheckingStatus] = useState<string | null>(null);
-
-  // Admin auth guard
-  useEffect(() => {
-    const stored = localStorage.getItem('user');
-    if (!stored) return navigate('/login');
-    try {
-      const parsed = JSON.parse(stored);
-      if (parsed.role !== 'admin') navigate('/');
-    } catch {
-      navigate('/login');
-    }
-  }, [navigate]);
 
   const fetchVideos = async () => {
     try {

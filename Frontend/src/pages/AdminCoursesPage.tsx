@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import SharedNavbar from '../components/SharedNavbar';
 import { coursesApi } from '../services/api';
 
@@ -56,7 +55,6 @@ const AdminCoursesPage: React.FC = () => {
   const [showAddMaterialForm, setShowAddMaterialForm] = useState(false);
   const [materialType, setMaterialType] = useState<'file' | 'video' | 'link' | 'note' | 'pdf' | 'module' | 'pyq' | 'notes'>('file');
   const [uploadingFile, setUploadingFile] = useState(false);
-  const navigate = useNavigate();
 
   // Material form state
   const [materialForm, setMaterialForm] = useState({
@@ -84,27 +82,8 @@ const AdminCoursesPage: React.FC = () => {
   });
 
   useEffect(() => {
-    // Check if admin is logged in
-    const storedUser = localStorage.getItem('user');
-    if (!storedUser) {
-      navigate('/login');
-      return;
-    }
-
-    try {
-      const parsedUser = JSON.parse(storedUser);
-      if (parsedUser.role !== 'admin') {
-        navigate('/');
-        return;
-      }
-    } catch (error) {
-      console.error('Error parsing user data:', error);
-      navigate('/login');
-      return;
-    }
-
     fetchCourses();
-  }, [navigate]);
+  }, []);
 
   const fetchCourses = async () => {
     try {

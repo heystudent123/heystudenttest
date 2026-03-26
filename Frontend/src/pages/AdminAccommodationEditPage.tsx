@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
 import api from '../services/api';
 
 // Address interface removed as per requirements
@@ -91,33 +90,10 @@ const AdminAccommodationEditPage: React.FC = () => {
 
   
   useEffect(() => {
-    // Check if admin is logged in
-    const storedUser = localStorage.getItem('user');
-    if (!storedUser) {
-      navigate('/login');
-      return;
-    }
-
-    try {
-      const parsedUser = JSON.parse(storedUser);
-      if (parsedUser.role !== 'admin') {
-        navigate('/');
-        return;
-      }
-    } catch (error) {
-      console.error('Error parsing user data:', error);
-      navigate('/login');
-      return;
-    }
-
     // Fetch accommodation details if in edit mode
     const fetchAccommodation = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${process.env.REACT_APP_API_URL}/accommodations/${id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        console.log('Accommodation data:', response.data.data);
+        const response = await api.get(`/accommodations/${id}`);
         const fetched = response.data.data;
         setAccommodation({
           ...fetched,
@@ -188,11 +164,8 @@ const handleSelectAllAmenities = (e: React.ChangeEvent<HTMLInputElement>) => {
     try {
       setIsCheckingUniqueCode(true);
       setUniqueCodeError('');
-      
-      const token = localStorage.getItem('token');
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/accommodations/check-unique-code/${code}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+
+      const response = await api.get(`/accommodations/check-unique-code/${code}`);
       
       // If response contains exists=true and it's not the current accommodation being edited
       if (response.data.exists && (!id || response.data.id !== id)) {
@@ -253,11 +226,10 @@ const handleSelectAllAmenities = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError('');
     const payload = { ...accommodation, images: cleanedLinks };
     try {
-      const token = localStorage.getItem('token');
       if (id) {
-        await api.put(`/accommodations/${id}`, payload, { headers: { Authorization: `Bearer ${token}` } });
+        await api.put(`/accommodations/${id}`, payload);
       } else {
-        await api.post('/accommodations', payload, { headers: { Authorization: `Bearer ${token}` } });
+        await api.post('/accommodations', payload);
       }
       navigate('/admin/accommodations');
     } catch (err: any) {

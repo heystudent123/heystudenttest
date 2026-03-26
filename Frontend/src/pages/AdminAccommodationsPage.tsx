@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api';
 
 interface Address {
   street?: string;
@@ -37,25 +37,6 @@ const AdminAccommodationsPage: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Check if admin is logged in
-    const storedUser = localStorage.getItem('user');
-    if (!storedUser) {
-      navigate('/login');
-      return;
-    }
-
-    try {
-      const parsedUser = JSON.parse(storedUser);
-      if (parsedUser.role !== 'admin') {
-        navigate('/');
-        return;
-      }
-    } catch (error) {
-      console.error('Error parsing user data:', error);
-      navigate('/login');
-      return;
-    }
-
     // Fetch accommodations
     const fetchAccommodations = async () => {
       try {
@@ -67,7 +48,6 @@ const AdminAccommodationsPage: React.FC = () => {
         
         // Handle different response formats
         const accommodationsData = response.data || response;
-        console.log('Accommodation data:', accommodationsData);
         
         const accommodationsArray = Array.isArray(accommodationsData) ? accommodationsData : [];
         setAccommodations(accommodationsArray);
@@ -89,10 +69,7 @@ const AdminAccommodationsPage: React.FC = () => {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${process.env.REACT_APP_API_URL}/accommodations/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.delete(`/accommodations/${id}`);
       
       // Remove from state
       const updatedAccommodations = accommodations.filter(acc => acc._id !== id);

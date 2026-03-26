@@ -76,9 +76,10 @@ function AppContent() {
       const timeSpent = currentTime - pageEnterTimeRef.current;
       const prevPageName = prevPathRef.current === '/' ? 'Home' :
         prevPathRef.current.charAt(1).toUpperCase() + prevPathRef.current.slice(2).replace('/', ' ');
-      console.log(`Time spent on ${prevPageName}: ${timeSpent}ms`);
+      void timeSpent;
+      void prevPageName;
     }
-    console.log(`Page view: ${pageName}`);
+    void pageName;
     prevPathRef.current = currentPath;
     pageEnterTimeRef.current = currentTime;
   }, [location]);
