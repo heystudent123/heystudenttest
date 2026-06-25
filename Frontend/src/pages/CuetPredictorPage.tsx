@@ -197,39 +197,39 @@ const CuetPredictorPage: React.FC = () => {
             style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.55) 55%, rgba(255,249,237,1) 100%)' }}
           />
 
-          <div className="relative z-10 mx-auto max-w-4xl px-4 py-16 text-center sm:py-20">
-            <div className="mb-7 inline-flex items-center rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-white backdrop-blur-sm">
+          <div className="relative z-10 mx-auto max-w-4xl px-4 py-12 text-center sm:py-20">
+            <div className="mb-5 inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm sm:px-4 sm:py-2 sm:text-sm">
               <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-amber-400" />
-              DU Admissions 2024 &middot; Round 1 Cutoffs
+              DU Admissions 2026 &middot; Round 1 Cutoffs
             </div>
 
             <h1
-              className="mb-6 font-bold tracking-tight text-white"
-              style={{ fontFamily: SERIF, fontSize: 'clamp(2.4rem, 6vw, 4.2rem)', lineHeight: 1.12 }}
+              className="mb-4 font-bold tracking-tight text-white"
+              style={{ fontFamily: SERIF, fontSize: 'clamp(2rem, 8vw, 4.2rem)', lineHeight: 1.12 }}
             >
               CUET College<br />
               <span style={{ fontFamily: SANS, fontWeight: 800, color: '#F5A623' }}>Predictor</span>
             </h1>
 
             <p
-              className="mx-auto mb-2 max-w-2xl leading-relaxed text-white/80"
-              style={{ fontSize: 'clamp(1rem, 2.2vw, 1.2rem)', fontFamily: "'DM Sans','Inter',sans-serif" }}
+              className="mx-auto mb-2 max-w-2xl px-2 leading-relaxed text-white/80"
+              style={{ fontSize: 'clamp(0.875rem, 3vw, 1.2rem)', fontFamily: "'DM Sans','Inter',sans-serif" }}
             >
               Enter your CUET score and category to instantly see every Delhi University college
               within your reach — ranked by your real chances of admission.
             </p>
 
-            <div className="mt-9 flex flex-wrap items-center justify-center gap-6 text-white/90 sm:gap-10">
+            <div className="mt-7 flex items-center justify-center gap-5 text-white/90 sm:mt-9 sm:gap-10">
               {[
                 { n: '90+', l: 'DU Colleges' },
                 { n: '1,500+', l: 'Programs' },
                 { n: 'Instant', l: 'Results' },
               ].map((s, i) => (
                 <React.Fragment key={s.l}>
-                  {i > 0 && <div className="hidden h-8 w-px bg-white/20 sm:block" />}
+                  {i > 0 && <div className="h-7 w-px bg-white/20" />}
                   <div className="text-center">
-                    <div className="text-2xl font-extrabold" style={{ fontFamily: SANS }}>{s.n}</div>
-                    <div className="mt-0.5 text-xs text-white/60">{s.l}</div>
+                    <div className="text-xl font-extrabold sm:text-2xl" style={{ fontFamily: SANS }}>{s.n}</div>
+                    <div className="mt-0.5 text-[10px] text-white/60 sm:text-xs">{s.l}</div>
                   </div>
                 </React.Fragment>
               ))}
@@ -238,9 +238,9 @@ const CuetPredictorPage: React.FC = () => {
         </section>
 
         {/* ───────── PREDICTOR FORM ───────── */}
-        <section className="relative z-10 px-4 pb-16 -mt-6">
+        <section className="relative z-10 px-3 pb-14 -mt-4 sm:px-4 sm:pb-16 sm:-mt-6">
           <div className="mx-auto max-w-2xl">
-            <div className="rounded-3xl border border-amber-100 bg-white p-6 shadow-xl shadow-amber-900/5 sm:p-9">
+            <div className="rounded-2xl border border-amber-100 bg-white p-5 shadow-xl shadow-amber-900/5 sm:rounded-3xl sm:p-9">
               <div className="mb-6 text-center">
                 <h2 className="text-2xl font-bold text-black" style={{ fontFamily: SANS }}>Check Your Chances</h2>
                 <p className="mt-1 text-sm text-neutral-500">Takes 20 seconds · 100% free</p>
@@ -397,7 +397,7 @@ const CuetPredictorPage: React.FC = () => {
 
         {/* ───────── RESULTS ───────── */}
         {results !== null && (
-          <section className="px-4 pb-24">
+          <section className="px-3 pb-16 sm:px-4 sm:pb-24">
             <div className="mx-auto max-w-4xl">
               {results.length === 0 ? (
                 <div className="mx-auto max-w-md rounded-3xl border border-amber-100 bg-white p-10 text-center shadow-lg">
@@ -412,9 +412,9 @@ const CuetPredictorPage: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  <div className="mb-8 text-center">
+                  <div className="mb-6 text-center sm:mb-8">
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-amber-600">Your Results</p>
-                    <h2 className="text-3xl font-bold text-black sm:text-4xl" style={{ fontFamily: SERIF }}>
+                    <h2 className="text-2xl font-bold text-black sm:text-4xl" style={{ fontFamily: SERIF }}>
                       You have a shot at {results.length} programs
                     </h2>
                     <p className="mt-2 text-sm text-neutral-500">
@@ -423,7 +423,7 @@ const CuetPredictorPage: React.FC = () => {
                   </div>
 
                   {/* Summary cards */}
-                  <div className="mx-auto mb-8 grid max-w-2xl grid-cols-3 gap-3 sm:gap-4">
+                  <div className="mx-auto mb-6 grid max-w-2xl grid-cols-3 gap-2 sm:mb-8 sm:gap-4">
                     {(['High', 'Medium', 'Low'] as const).map(key => {
                       const cfg = CHANCE_CONFIG[key];
                       return (
@@ -435,8 +435,8 @@ const CuetPredictorPage: React.FC = () => {
                           }`}
                         >
                           <div className={`absolute left-0 top-0 h-full w-1 ${cfg.bar}`} />
-                          <div className="pl-1 text-3xl font-black text-black">{counts[key]}</div>
-                          <div className={`pl-1 text-xs font-semibold ${cfg.text}`}>{cfg.label}</div>
+                          <div className="pl-1 text-2xl font-black text-black sm:text-3xl">{counts[key]}</div>
+                          <div className={`pl-1 text-[10px] font-semibold sm:text-xs ${cfg.text}`}>{cfg.label}</div>
                         </button>
                       );
                     })}
@@ -445,12 +445,12 @@ const CuetPredictorPage: React.FC = () => {
                   {/* Filters */}
                   <div className="mb-6 space-y-3">
                     {/* Chance tabs */}
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
                       {(['all', 'High', 'Medium', 'Low'] as const).map(tab => (
                         <button
                           key={tab}
                           onClick={() => setActiveChance(tab)}
-                          className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${
+                          className={`flex-shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${
                             activeChance === tab
                               ? 'bg-black text-white'
                               : 'border border-neutral-200 bg-white text-neutral-600 hover:bg-amber-50'
@@ -535,7 +535,7 @@ const CuetPredictorPage: React.FC = () => {
                       {isSearchMode ? `No DU colleges match "${search.trim()}".` : 'No colleges match your filter.'}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3">
                       {displayed.map((college, i) => {
                         const cfg = cfgFor(college.chance);
                         const hasScore = submittedMeta.score !== '';
@@ -543,13 +543,13 @@ const CuetPredictorPage: React.FC = () => {
                         return (
                           <div
                             key={i}
-                            className={`relative overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${cfg.card}`}
+                            className={`relative overflow-hidden rounded-xl border bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:rounded-2xl sm:p-5 ${cfg.card}`}
                           >
                             <div className={`absolute left-0 top-0 h-full w-1 ${cfg.bar}`} />
-                            <div className="flex items-start justify-between gap-3 pl-2">
+                            <div className="flex items-start justify-between gap-2 pl-2">
                               <div className="min-w-0 flex-1">
                                 <h3 className="text-sm font-bold leading-snug text-black break-words">{college.college_name}</h3>
-                                <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                                   <span className="text-neutral-500">
                                     Cutoff <span className="font-bold text-neutral-800">{college.cutoffScore.toFixed(1)}</span>
                                   </span>
@@ -563,7 +563,7 @@ const CuetPredictorPage: React.FC = () => {
                                   )}
                                 </div>
                               </div>
-                              <span className={`flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${cfg.badge}`}>
+                              <span className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold sm:px-2.5 sm:py-1 sm:text-[11px] ${cfg.badge}`}>
                                 {cfg.pill}
                               </span>
                             </div>

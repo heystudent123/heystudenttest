@@ -10,7 +10,6 @@ interface Submission {
   score: number;
   category: string;
   gender?: string;
-  predictedColleges: { college_name: string; cutoffScore: number; chance: string }[];
   createdAt: string;
 }
 
@@ -31,8 +30,6 @@ const AdminCuetPredictorPage: React.FC = () => {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [expanded, setExpanded] = useState<string | null>(null);
-
   // Pagination
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -84,9 +81,6 @@ const AdminCuetPredictorPage: React.FC = () => {
         Gender: s.gender === 'M' ? 'Male' : s.gender === 'F' ? 'Female' : '—',
         'CUET Score': s.score,
         Category: s.category,
-        'Top College': s.predictedColleges?.[0]?.college_name || '—',
-        'Top Chance': s.predictedColleges?.[0]?.chance || '—',
-        'Total Predictions': s.predictedColleges?.length || 0,
         Date: s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-IN') : '',
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -198,70 +192,34 @@ const AdminCuetPredictorPage: React.FC = () => {
                 <table className="min-w-full divide-y divide-gray-100 text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      {['#', 'Name', 'Mobile', 'Score', 'Category', 'Gender', 'Predictions', 'Date', 'Details'].map(h => (
+                      {['#', 'Name', 'Mobile', 'Score', 'Category', 'Gender', 'Date'].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {filtered.map((s, idx) => (
-                      <React.Fragment key={s._id}>
-                        <tr className="hover:bg-gray-50 transition-colors">
-                          <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{(page - 1) * PAGE_SIZE + idx + 1}</td>
-                          <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{s.name}</td>
-                          <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
-                            <a href={`https://wa.me/${s.mobile}`} target="_blank" rel="noopener noreferrer" className="hover:underline text-green-700">
-                              {s.mobile}
-                            </a>
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-amber-700 whitespace-nowrap">{s.score}</td>
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${CATEGORY_COLORS[s.category] || 'bg-gray-100 text-gray-600'}`}>
-                              {s.category}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">
-                            {s.gender === 'M' ? '♂ Male' : s.gender === 'F' ? '♀ Female' : '—'}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                            {s.predictedColleges?.length ?? 0} colleges
-                          </td>
-                          <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
-                            {s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-                          </td>
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            {(s.predictedColleges?.length ?? 0) > 0 && (
-                              <button
-                                onClick={() => setExpanded(expanded === s._id ? null : s._id)}
-                                className="text-xs text-blue-600 hover:underline font-medium"
-                              >
-                                {expanded === s._id ? 'Hide' : 'View'} predictions
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                        {expanded === s._id && (
-                          <tr>
-                            <td colSpan={9} className="px-6 pb-4 bg-gray-50">
-                              <div className="pt-2 pb-1">
-                                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Top predicted colleges (snapshot at submission)</p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                  {s.predictedColleges.map((c, i) => (
-                                    <div key={i} className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2">
-                                      <span className="text-xs text-gray-700 truncate flex-1 mr-2">{c.college_name}</span>
-                                      <span className={`flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                                        c.chance === 'High' ? 'bg-green-100 text-green-700' :
-                                        c.chance === 'Medium' ? 'bg-amber-100 text-amber-700' :
-                                        'bg-red-100 text-red-600'
-                                      }`}>{c.chance}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
+                      <tr key={s._id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{s.name}</td>
+                        <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
+                          <a href={`https://wa.me/${s.mobile}`} target="_blank" rel="noopener noreferrer" className="hover:underline text-green-700">
+                            {s.mobile}
+                          </a>
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-amber-700 whitespace-nowrap">{s.score}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${CATEGORY_COLORS[s.category] || 'bg-gray-100 text-gray-600'}`}>
+                            {s.category}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600">
+                          {s.gender === 'M' ? 'Male' : s.gender === 'F' ? 'Female' : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+                          {s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                        </td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
