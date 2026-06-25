@@ -767,4 +767,28 @@ export const postsApi = {
   },
 };
 
+// =================== CUET PREDICTOR API ===================
+export const cuetPredictorApi = {
+  submit: async (data: {
+    name: string;
+    mobile: string;
+    score: number;
+    category: string;
+    gender: string;
+  }) => {
+    const response = await api.post('/cuet-predictor/submit', data);
+    return response.data;
+  },
+
+  searchColleges: async (params: { q?: string; category?: string; score?: number; gender?: string }) => {
+    const response = await api.get('/cuet-predictor/colleges', { params });
+    return response.data;
+  },
+
+  getAllSubmissions: async (page = 1, limit = 100) => {
+    const response = await api.get(`/cuet-predictor/admin/all?page=${page}&limit=${limit}`);
+    return response.data;
+  },
+};
+
 export default api;

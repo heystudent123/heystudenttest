@@ -90,7 +90,7 @@ const SharedNavbar: React.FC = () => {
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center relative">
             {/* Logo (image only) */}
-            <Link to="/" className="flex items-center" onClick={handleLinkClick} aria-label="Home" style={{ alignItems: 'center' }}>
+            <Link to="/" className="flex items-center flex-shrink-0" onClick={handleLinkClick} aria-label="Home" style={{ alignItems: 'center' }}>
               <img
                 src="/logo.png"
                 alt="Heystudent"
@@ -105,67 +105,72 @@ const SharedNavbar: React.FC = () => {
                 }}
               />
             </Link>
-            
-            {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center justify-between gap-8">
-              <div className="flex space-x-6">
-                <Link 
-                  to="/" 
-                  className={`font-medium ${location.pathname === '/' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
+
+            {/* Desktop Navigation — centered absolutely so it's always in the middle */}
+            <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 items-center space-x-6">
+              <Link
+                to="/"
+                className={`font-medium ${location.pathname === '/' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                Home
+              </Link>
+              <Link
+                to="/about"
+                className={`font-medium ${location.pathname === '/about' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                About Us
+              </Link>
+              <Link
+                to="/courses"
+                className={`font-medium ${location.pathname === '/courses' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                Courses
+              </Link>
+              <Link
+                to="/cuet-predictor"
+                className={`font-medium ${location.pathname === '/cuet-predictor' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                CUET Predictor
+              </Link>
+              {isEnrolled && (
+                <Link
+                  to="/student/dashboard"
+                  className={`font-medium ${location.pathname === '/student/dashboard' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
                 >
-                  Home
+                  My Dashboard
                 </Link>
-                <Link 
-                  to="/about" 
-                  className={`font-medium ${location.pathname === '/about' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
-                >
-                  About Us
-                </Link>
-                {isEnrolled && (
-                  <Link
-                    to="/student/dashboard"
-                    className={`font-medium ${location.pathname === '/student/dashboard' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
+              )}
+            </div>
+
+            {/* Right side — auth controls */}
+            <div className="hidden md:flex items-center space-x-4">
+              {isLoaded && isSignedIn ? (
+                <>
+                  {user?.role === 'admin' && (
+                    <Link to="/admin" className="font-medium text-blue-600 hover:text-blue-800">
+                      Admin Panel
+                    </Link>
+                  )}
+                  {user?.role === 'institute' && (
+                    <Link to="/institute/dashboard" className="font-medium text-blue-600 hover:text-blue-800">
+                      Institute Dashboard
+                    </Link>
+                  )}
+                  <button
+                    onClick={() => signOut({ redirectUrl: '/' })}
+                    className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
                   >
-                    My Dashboard
-                  </Link>
-                )}
-                <Link 
-                  to="/courses" 
-                  className={`font-medium ${location.pathname === '/courses' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
+                    Logout
+                  </button>
+                </>
+              ) : isLoaded ? (
+                <Link
+                  to="/login"
+                  className="block px-3 py-2 rounded-md text-base font-medium text-gray-600 hover:bg-[#fff0d0]"
                 >
-                  Courses
+                  Sign In
                 </Link>
-              </div>
-              
-              <div className="flex items-center space-x-4">
-                {isLoaded && isSignedIn ? (
-                  <>
-                    {user?.role === 'admin' && (
-                      <Link to="/admin" className="font-medium text-blue-600 hover:text-blue-800">
-                        Admin Panel
-                      </Link>
-                    )}
-                    {user?.role === 'institute' && (
-                      <Link to="/institute/dashboard" className="font-medium text-blue-600 hover:text-blue-800">
-                        Institute Dashboard
-                      </Link>
-                    )}
-                    <button
-                      onClick={() => signOut({ redirectUrl: '/' })}
-                      className="text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
-                    >
-                      Logout
-                    </button>
-                  </>
-                ) : isLoaded ? (
-                  <Link 
-                    to="/login"
-                    className="block px-3 py-2 rounded-md text-base font-medium text-gray-600 hover:bg-[#fff0d0]"
-                  >
-                    Sign In
-                  </Link>
-                ) : null}
-              </div>
+              ) : null}
             </div>
             
             {/* Mobile menu button */}
@@ -216,14 +221,21 @@ const SharedNavbar: React.FC = () => {
                   My Dashboard
                 </Link>
               )}
-              <Link 
-                to="/courses" 
+              <Link
+                to="/courses"
                 className={`block px-3 py-2 rounded-md text-base font-medium ${location.pathname === '/courses' ? 'text-black font-bold underline bg-[#ffe8b5]' : 'text-gray-800 hover:bg-[#ffe8b5]'}`}
                 onClick={handleLinkClick}
               >
                 Courses
               </Link>
-              
+              <Link
+                to="/cuet-predictor"
+                className={`block px-3 py-2 rounded-md text-base font-medium ${location.pathname === '/cuet-predictor' ? 'text-black font-bold underline bg-[#ffe8b5]' : 'text-gray-800 hover:bg-[#ffe8b5]'}`}
+                onClick={handleLinkClick}
+              >
+                CUET Predictor
+              </Link>
+
               {/* Divider */}
               <div className="border-t border-gray-200 my-2"></div>
               

@@ -113,6 +113,14 @@ const AdminPage: React.FC = () => {
             </div>
           </Link>
 
+          <Link to="/admin/cuet-predictor" className="bg-white overflow-hidden shadow rounded-lg hover:ring-2 hover:ring-indigo-400 transition">
+            <div className="px-4 py-5 sm:p-6 h-full flex flex-col">
+              <h3 className="text-lg font-medium text-gray-900">CUET Predictor Submissions</h3>
+              <p className="mt-4 text-sm text-gray-500 flex-grow">View all students who used the CUET college predictor — their scores, categories, and predicted colleges.</p>
+              <span className="mt-5 inline-block px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md self-start">Go</span>
+            </div>
+          </Link>
+
         </div>
       </div>
     </div>

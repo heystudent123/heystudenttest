@@ -31,6 +31,8 @@ const VideosPage               = lazy(() => import('./pages/VideosPage'));
 const AdminPostsPage           = lazy(() => import('./pages/AdminPostsPage'));
 const AdminPaidUsersPage       = lazy(() => import('./pages/AdminPaidUsersPage'));
 const AdminPrePaymentLeadsPage = lazy(() => import('./pages/AdminPrePaymentLeadsPage'));
+const CuetPredictorPage        = lazy(() => import('./pages/CuetPredictorPage'));
+const AdminCuetPredictorPage   = lazy(() => import('./pages/AdminCuetPredictorPage'));
 const StudentDashboardPage     = lazy(() => import('./pages/StudentDashboardPage'));
 const PostDetailPage           = lazy(() => import('./pages/PostDetailPage'));
 const InstituteDashboardPage   = lazy(() => import('./pages/InstituteDashboardPage'));
@@ -155,6 +157,12 @@ function AppContent() {
                 <Route path="/admin/pre-payment-leads" element={
                   <ProtectedRoute requiredRole="admin">
                     <AdminPrePaymentLeadsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/cuet-predictor" element={<CuetPredictorPage />} />
+                <Route path="/admin/cuet-predictor" element={
+                  <ProtectedRoute requiredRole="admin">
+                    <AdminCuetPredictorPage />
                   </ProtectedRoute>
                 } />
                 <Route path="/student/dashboard" element={

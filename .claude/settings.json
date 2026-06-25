@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc -l)",
+      "Bash(node -e \"const d = require\\('./du_cutoffs_round_one.json'\\); console.log\\('Total entries:', d.length\\); console.log\\('Sample:', JSON.stringify\\(d[0], null, 2\\)\\); console.log\\('Sample2:', JSON.stringify\\(d[10], null, 2\\)\\);\")",
+      "Bash(node -e ' *)",
+      "Bash(npx tsc *)",
+      "Bash(node -e \"const pkg = require\\('./package.json'\\); console.log\\(JSON.stringify\\(pkg.dependencies, null, 2\\)\\)\")",
+      "Bash(npm install *)",
+      "Bash(node parse_cutoffs.js)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const p=JSON.parse\\(d\\); console.log\\('main:', p.main\\); console.log\\('exports:', JSON.stringify\\(p.exports,null,2\\)\\)\")",
+      "Bash(node -e \"const p=require\\('./node_modules/pdf-parse/package.json'\\); console.log\\('main:', p.main\\); console.log\\('exports:', JSON.stringify\\(p.exports,null,2\\)\\)\")",
+      "Bash(node -e \"const m = require\\('pdf-parse'\\); console.log\\(typeof m\\); console.log\\(Object.keys\\(m\\)\\)\")",
+      "Bash(npm uninstall *)",
+      "Bash(node -e \"const m = require\\('pdf-parse'\\); console.log\\(typeof m\\)\")"
+    ]
+  }
+}
