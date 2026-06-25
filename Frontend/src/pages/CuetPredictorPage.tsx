@@ -239,18 +239,6 @@ const CuetPredictorPage: React.FC = () => {
     });
   }, [results, searchResults, isSearchMode, activeChance, filterCollege, filterCourse]);
 
-  // Course options filtered by selected college from the result set (used in results display)
-  const courseOptions = useMemo(() => {
-    const source = isSearchMode ? searchResults : (results || []);
-    const fc = form.college.trim().toLowerCase();
-    const names = new Set<string>();
-    source.forEach(r => {
-      const [col = '', course = ''] = r.college_name.split(' — ');
-      if (fc && !col.toLowerCase().includes(fc)) return;
-      if (course) names.add(course.trim());
-    });
-    return Array.from(names).sort();
-  }, [results, searchResults, isSearchMode, form.college]);
 
   const resetForm = () => {
     setResults(null);
