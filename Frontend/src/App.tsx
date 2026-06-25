@@ -159,7 +159,7 @@ function AppContent() {
                     <AdminPrePaymentLeadsPage />
                   </ProtectedRoute>
                 } />
-                <Route path="/cuet-predictor" element={<CuetPredictorPage />} />
+                <Route path="/college-predictor" element={<CuetPredictorPage />} />
                 <Route path="/admin/cuet-predictor" element={
                   <ProtectedRoute requiredRole="admin">
                     <AdminCuetPredictorPage />

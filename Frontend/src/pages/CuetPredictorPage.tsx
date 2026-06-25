@@ -1,6 +1,81 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import SharedNavbar from '../components/SharedNavbar';
 import { cuetPredictorApi } from '../services/api';
+import { DU_COLLEGES, DU_PROGRAMS } from '../data/duCutoffLists';
+
+// Searchable combobox — renders a text input + filtered dropdown list
+interface ComboboxProps {
+  options: string[];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  error?: boolean;
+}
+const Combobox: React.FC<ComboboxProps> = ({ options, value, onChange, placeholder, error }) => {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Sync query when value is cleared externally
+  useEffect(() => { if (!value) setQuery(''); }, [value]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(o => o.toLowerCase().includes(q));
+  }, [query, options]);
+
+  const select = (opt: string) => {
+    onChange(opt);
+    setQuery(opt);
+    setOpen(false);
+  };
+
+  const clear = () => { onChange(''); setQuery(''); };
+
+  return (
+    <div ref={ref} className="relative w-full">
+      <input
+        type="text"
+        value={query}
+        placeholder={placeholder}
+        onFocus={() => setOpen(true)}
+        onChange={e => { setQuery(e.target.value); setOpen(true); if (!e.target.value) onChange(''); }}
+        className={`w-full rounded-xl border bg-amber-50/40 py-3 pl-4 pr-9 text-sm text-black outline-none transition-all focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-200 ${error ? 'border-rose-300 bg-rose-50' : 'border-neutral-200'}`}
+      />
+      {/* Clear button */}
+      {query && (
+        <button type="button" onClick={clear} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+      {/* Dropdown */}
+      {open && filtered.length > 0 && (
+        <ul className="absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
+          {filtered.map(opt => (
+            <li
+              key={opt}
+              onMouseDown={() => select(opt)}
+              className={`cursor-pointer px-4 py-2.5 text-sm transition-colors hover:bg-amber-50 ${opt === value ? 'bg-amber-100 font-semibold text-amber-800' : 'text-neutral-800'}`}
+            >
+              {opt}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
 
 interface PredictedCollege {
   college_name: string;
@@ -58,7 +133,7 @@ const SERIF = "'Playfair Display', Georgia, serif";
 const SANS = "'Montserrat','Inter',sans-serif";
 
 const CuetPredictorPage: React.FC = () => {
-  const [form, setForm] = useState({ name: '', mobile: '', score: '', category: '', gender: '' });
+  const [form, setForm] = useState({ name: '', mobile: '', score: '', category: '', gender: '', college: '', course: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<PredictedCollege[] | null>(null);
@@ -68,8 +143,8 @@ const CuetPredictorPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<PredictedCollege[]>([]);
   const [searching, setSearching] = useState(false);
-  const [filterCollege, setFilterCollege] = useState('');
-  const [filterCourse, setFilterCourse] = useState('');
+  const filterCollege = form.college;
+  const filterCourse = form.course;
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -77,8 +152,8 @@ const CuetPredictorPage: React.FC = () => {
     if (!form.mobile.trim()) e.mobile = 'Mobile number is required';
     else if (!/^\d{10}$/.test(form.mobile.trim())) e.mobile = 'Enter a valid 10-digit number';
     if (!form.score) e.score = 'Score is required';
-    else if (isNaN(Number(form.score)) || Number(form.score) < 0 || Number(form.score) > 800)
-      e.score = 'Score must be 0–800';
+    else if (isNaN(Number(form.score)) || Number(form.score) < 0 || Number(form.score) > 1000)
+      e.score = 'Score must be 0–1000';
     if (!form.category) e.category = 'Select your category';
     if (!form.gender) e.gender = 'Select your gender';
     return e;
@@ -95,8 +170,6 @@ const CuetPredictorPage: React.FC = () => {
     setResults(null);
     setActiveChance('all');
     setSearch('');
-    setFilterCollege('');
-    setFilterCourse('');
 
     try {
       const res = await cuetPredictorApi.submit({
@@ -166,9 +239,22 @@ const CuetPredictorPage: React.FC = () => {
     });
   }, [results, searchResults, isSearchMode, activeChance, filterCollege, filterCourse]);
 
+  // Course options filtered by selected college from the result set (used in results display)
+  const courseOptions = useMemo(() => {
+    const source = isSearchMode ? searchResults : (results || []);
+    const fc = form.college.trim().toLowerCase();
+    const names = new Set<string>();
+    source.forEach(r => {
+      const [col = '', course = ''] = r.college_name.split(' — ');
+      if (fc && !col.toLowerCase().includes(fc)) return;
+      if (course) names.add(course.trim());
+    });
+    return Array.from(names).sort();
+  }, [results, searchResults, isSearchMode, form.college]);
+
   const resetForm = () => {
     setResults(null);
-    setForm({ name: '', mobile: '', score: '', category: '', gender: '' });
+    setForm({ name: '', mobile: '', score: '', category: '', gender: '', college: '', course: '' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -198,9 +284,11 @@ const CuetPredictorPage: React.FC = () => {
           />
 
           <div className="relative z-10 mx-auto max-w-4xl px-4 py-12 text-center sm:py-20">
-            <div className="mb-5 inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm sm:px-4 sm:py-2 sm:text-sm">
-              <span className="mr-2 h-2 w-2 animate-pulse rounded-full bg-amber-400" />
-              DU Admissions 2026 &middot; Round 1 Cutoffs
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-medium text-white backdrop-blur-sm sm:px-4 sm:py-2 sm:text-sm">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+              Most Accurate
+              <span className="h-3 w-px bg-white/30" />
+              Made by DU Alumni
             </div>
 
             <h1
@@ -282,13 +370,13 @@ const CuetPredictorPage: React.FC = () => {
                   <div className="sm:col-span-2">
                     <div className="mb-1.5 flex items-center justify-between">
                       <label className="block text-sm font-semibold text-neutral-700">CUET Score</label>
-                      <span className="text-xs text-neutral-400">out of 800</span>
+                      <span className="text-xs text-neutral-400">out of 1000</span>
                     </div>
                     <input
                       type="number"
-                      placeholder="620"
+                      placeholder="720"
                       min={0}
-                      max={800}
+                      max={1000}
                       value={form.score}
                       onChange={e => { setForm(f => ({ ...f, score: e.target.value })); setErrors(er => ({ ...er, score: '' })); }}
                       className={`w-full rounded-xl border bg-amber-50/40 px-4 py-3 text-2xl font-bold text-black outline-none transition-all focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-200 ${errors.score ? 'border-rose-300 bg-rose-50' : 'border-neutral-200'}`}
@@ -352,6 +440,32 @@ const CuetPredictorPage: React.FC = () => {
                     {form.gender === 'M' && (
                       <p className="mt-1.5 text-xs text-neutral-400">Women-only colleges will be excluded from your results</p>
                     )}
+                  </div>
+
+                  {/* College filter */}
+                  <div className="sm:col-span-2">
+                    <label className="mb-1.5 block text-sm font-semibold text-neutral-700">
+                      College <span className="font-normal text-neutral-400">(optional)</span>
+                    </label>
+                    <Combobox
+                      options={DU_COLLEGES}
+                      value={form.college}
+                      onChange={v => setForm(f => ({ ...f, college: v, course: '' }))}
+                      placeholder="Search college name…"
+                    />
+                  </div>
+
+                  {/* Course filter */}
+                  <div className="sm:col-span-2">
+                    <label className="mb-1.5 block text-sm font-semibold text-neutral-700">
+                      Course <span className="font-normal text-neutral-400">(optional)</span>
+                    </label>
+                    <Combobox
+                      options={DU_PROGRAMS}
+                      value={form.course}
+                      onChange={v => setForm(f => ({ ...f, course: v }))}
+                      placeholder="Search course or program…"
+                    />
                   </div>
                 </div>
 
@@ -442,78 +556,23 @@ const CuetPredictorPage: React.FC = () => {
                     })}
                   </div>
 
-                  {/* Filters */}
-                  <div className="mb-6 space-y-3">
-                    {/* Chance tabs */}
-                    <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
-                      {(['all', 'High', 'Medium', 'Low'] as const).map(tab => (
-                        <button
-                          key={tab}
-                          onClick={() => setActiveChance(tab)}
-                          className={`flex-shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${
-                            activeChance === tab
-                              ? 'bg-black text-white'
-                              : 'border border-neutral-200 bg-white text-neutral-600 hover:bg-amber-50'
-                          }`}
-                        >
-                          {tab === 'all'
-                            ? (isSearchMode ? 'All' : `All (${counts.all})`)
-                            : (isSearchMode ? CHANCE_CONFIG[tab].label : `${CHANCE_CONFIG[tab].label} (${counts[tab]})`)}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* College + Course filter row */}
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      {/* College name filter */}
-                      <div className="relative flex-1">
-                        <svg className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                        </svg>
-                        <input
-                          type="text"
-                          placeholder="Filter by college name…"
-                          value={filterCollege}
-                          onChange={e => setFilterCollege(e.target.value)}
-                          className="w-full rounded-full border border-neutral-200 bg-white py-2.5 pl-10 pr-4 text-sm text-black outline-none transition-all focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-                        />
-                      </div>
-
-                      {/* Course / program filter */}
-                      <div className="relative flex-1">
-                        <svg className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                        </svg>
-                        <input
-                          type="text"
-                          placeholder="Filter by course…"
-                          value={filterCourse}
-                          onChange={e => setFilterCourse(e.target.value)}
-                          className="w-full rounded-full border border-neutral-200 bg-white py-2.5 pl-10 pr-4 text-sm text-black outline-none transition-all focus:border-amber-400 focus:ring-2 focus:ring-amber-200"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Active filter chips */}
-                    {(filterCollege || filterCourse) && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        {filterCollege && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
-                            College: {filterCollege}
-                            <button onClick={() => setFilterCollege('')} className="ml-0.5 hover:text-amber-900">×</button>
-                          </span>
-                        )}
-                        {filterCourse && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
-                            Course: {filterCourse}
-                            <button onClick={() => setFilterCourse('')} className="ml-0.5 hover:text-amber-900">×</button>
-                          </span>
-                        )}
-                        <button onClick={() => { setFilterCollege(''); setFilterCourse(''); }} className="text-xs text-neutral-400 hover:text-neutral-600 underline">
-                          Clear all
-                        </button>
-                      </div>
-                    )}
+                  {/* Chance filter tabs */}
+                  <div className="mb-5 flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
+                    {(['all', 'High', 'Medium', 'Low'] as const).map(tab => (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveChance(tab)}
+                        className={`flex-shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold transition-all ${
+                          activeChance === tab
+                            ? 'bg-black text-white'
+                            : 'border border-neutral-200 bg-white text-neutral-600 hover:bg-amber-50'
+                        }`}
+                      >
+                        {tab === 'all'
+                          ? (isSearchMode ? 'All' : `All (${counts.all})`)
+                          : (isSearchMode ? CHANCE_CONFIG[tab].label : `${CHANCE_CONFIG[tab].label} (${counts[tab]})`)}
+                      </button>
+                    ))}
                   </div>
 
                   {/* Search-mode banner */}

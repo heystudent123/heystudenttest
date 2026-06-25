@@ -77,8 +77,8 @@ exports.submitPredictor = async (req, res) => {
     }
 
     const parsedScore = parseFloat(score);
-    if (isNaN(parsedScore) || parsedScore < 0 || parsedScore > 800) {
-      return res.status(400).json({ success: false, message: 'Score must be a number between 0 and 800.' });
+    if (isNaN(parsedScore) || parsedScore < 0 || parsedScore > 1000) {
+      return res.status(400).json({ success: false, message: 'Score must be a number between 0 and 1000.' });
     }
 
     const validCategories = ['UR', 'OBC', 'SC', 'ST', 'EWS', 'PwBD'];

@@ -17,7 +17,7 @@ const CuetPredictorSchema = new mongoose.Schema(
       type: Number,
       required: [true, 'CUET score is required'],
       min: [0, 'Score cannot be negative'],
-      max: [800, 'Score cannot exceed 800'],
+      max: [1000, 'Score cannot exceed 1000'],
     },
     category: {
       type: String,

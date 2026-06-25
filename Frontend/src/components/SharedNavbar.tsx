@@ -127,10 +127,10 @@ const SharedNavbar: React.FC = () => {
                 Courses
               </Link>
               <Link
-                to="/cuet-predictor"
-                className={`font-medium ${location.pathname === '/cuet-predictor' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
+                to="/college-predictor"
+                className={`font-medium ${location.pathname === '/college-predictor' ? 'text-black font-bold' : 'text-gray-600 hover:text-gray-900'}`}
               >
-                CUET Predictor
+                College Predictor
               </Link>
               {isEnrolled && (
                 <Link
@@ -229,11 +229,11 @@ const SharedNavbar: React.FC = () => {
                 Courses
               </Link>
               <Link
-                to="/cuet-predictor"
-                className={`block px-3 py-2 rounded-md text-base font-medium ${location.pathname === '/cuet-predictor' ? 'text-black font-bold underline bg-[#ffe8b5]' : 'text-gray-800 hover:bg-[#ffe8b5]'}`}
+                to="/college-predictor"
+                className={`block px-3 py-2 rounded-md text-base font-medium ${location.pathname === '/college-predictor' ? 'text-black font-bold underline bg-[#ffe8b5]' : 'text-gray-800 hover:bg-[#ffe8b5]'}`}
                 onClick={handleLinkClick}
               >
-                CUET Predictor
+                College Predictor
               </Link>
 
               {/* Divider */}
