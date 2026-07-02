@@ -71,10 +71,17 @@ const AdminCuetPredictorPage: React.FC = () => {
   };
 
   const exportExcel = async () => {
-    // Fetch all data for export (no pagination)
     try {
-      const res = await cuetPredictorApi.getAllSubmissions(1, 10000);
-      const all: Submission[] = res.data || [];
+      let all: Submission[] = [];
+      let p = 1;
+      const limit = 1000;
+      while (true) {
+        const res = await cuetPredictorApi.getAllSubmissions(p, limit);
+        const batch: Submission[] = res.data || [];
+        all = all.concat(batch);
+        if (batch.length < limit || all.length >= (res.total || 0)) break;
+        p++;
+      }
       const rows = all.map(s => ({
         Name: s.name,
         Mobile: s.mobile,
