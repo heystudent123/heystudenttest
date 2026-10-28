@@ -1,6 +1,8 @@
 const EmailUser = require('../models/EmailUser');
 const Referral = require('../models/Referral');
 const Payment = require('../models/Payment');
+const ReferralReward = require('../models/ReferralReward');
+const ReferralRewardSetting = require('../models/ReferralRewardSetting');
 const ErrorResponse = require('../utils/errorResponse');
 
 // @desc    Validate referral code
@@ -38,12 +40,24 @@ exports.validateReferralCode = async (req, res, next) => {
 exports.getMyReferralCode = async (req, res, next) => {
   try {
     const user = await EmailUser.findById(req.user.id);
-    
+    const noteField = user.role === 'institute' ? 'notes.referralCode' : 'notes.studentReferralCode';
+    const [setting, pending, paidReferralCount] = await Promise.all([
+      ReferralRewardSetting.findOne({ key: 'student' }).select('discountPercent').lean(),
+      ReferralReward.find({ referrerId: user._id, status: { $in: ['available', 'reserved'] } }).sort({ createdAt: 1 }).select('percent').lean(),
+      user.referralCode
+        ? Payment.countDocuments({ status: 'paid', [noteField]: user.referralCode })
+        : 0,
+    ]);
+    const isStudent = user.role === 'student';
+
     res.status(200).json({
       success: true,
       data: {
         referralCode: user.referralCode,
-        referralsCount: user.referrals.length
+        referralsCount: paidReferralCount,
+        rewardPerUse: isStudent ? (Number(setting?.discountPercent) || 0) : 0,
+        pendingDiscount: isStudent ? (Number(pending[0]?.percent) || 0) : 0,
+        pendingCount: isStudent ? pending.length : 0,
       }
     });
   } catch (err) {
@@ -67,79 +81,15 @@ exports.getReferredUsers = async (req, res, next) => {
       });
     }
 
-    const { phone, page = 1, limit = 10 } = req.query;
-    const pageNum  = parseInt(page,  10) || 1;
-    const limitNum = parseInt(limit, 10) || 10;
-    const skip = (pageNum - 1) * limitNum;
-
-    const normalizedCode = String(me.referralCode || '').trim();
-
-    // Primary source: explicit user attribution.
-    const directUserIds = await EmailUser.find({ referrerCodeUsed: normalizedCode })
-      .select('_id')
-      .lean();
-
-    // Fallback source: historical paid payments carrying referralCode in notes.
-    // Keep this fault-tolerant so payment query issues never break institute dashboard.
-    let paymentUserIds = [];
-    try {
-      const fromNotes = await Payment.find({
-        status: 'paid',
-        'notes.referralCode': normalizedCode,
-      }).distinct('userId');
-      paymentUserIds = Array.isArray(fromNotes) ? fromNotes : [];
-    } catch (paymentErr) {
-      console.warn('Referral fallback query failed:', paymentErr.message);
-      paymentUserIds = [];
-    }
-
-    const mergedIds = Array.from(new Set([
-      ...directUserIds
-        .map((u) => u?._id)
-        .filter(Boolean)
-        .map((id) => id.toString()),
-      ...paymentUserIds
-        .filter(Boolean)
-        .map((id) => id.toString()),
-    ]));
-
-    if (!mergedIds.length) {
-      return res.status(200).json({
-        success: true,
-        count: 0,
-        pagination: {},
-        data: []
-      });
-    }
-
-    const filter = { _id: { $in: mergedIds } };
-    if (phone) {
-      filter.phone = { $regex: phone, $options: 'i' };
-    }
-
-    const [total, users] = await Promise.all([
-      EmailUser.countDocuments(filter),
-      EmailUser.find(filter)
-        .select('name phone email college year createdAt')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean()
-    ]);
-
-    const pagination = {};
-    if (skip + limitNum < total) {
-      pagination.next = { page: pageNum + 1, limit: limitNum };
-    }
-    if (pageNum > 1) {
-      pagination.prev = { page: pageNum - 1, limit: limitNum };
-    }
+    const normalizedCode = String(me.referralCode || '').trim().toUpperCase();
+    const noteField = me.role === 'student' ? 'notes.studentReferralCode' : 'notes.referralCode';
+    const count = await Payment.countDocuments({ status: 'paid', [noteField]: normalizedCode });
 
     res.status(200).json({
       success: true,
-      count: total,
-      pagination,
-      data: users
+      count,
+      pagination: {},
+      data: []
     });
   } catch (err) {
     next(err);

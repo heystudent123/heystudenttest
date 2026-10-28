@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const EmailUserSchema = new mongoose.Schema({
   // Clerk user ID for authentication (primary identifier)
@@ -136,6 +137,31 @@ const EmailUserSchema = new mongoose.Schema({
 EmailUserSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
+});
+
+// Every user gets a unique referral code of their own, generated the first
+// time they're saved without one. Independent of name (unlike the legacy
+// name-prefix generator), so it never breaks on short/empty names, and
+// retries on the rare collision instead of failing the save.
+EmailUserSchema.pre('save', async function(next) {
+  if (this.referralCode) return next();
+  try {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // unambiguous chars only
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const bytes = crypto.randomBytes(6);
+      let code = '';
+      for (let i = 0; i < 6; i++) code += alphabet[bytes[i] % alphabet.length];
+      // eslint-disable-next-line no-await-in-loop
+      const existing = await this.constructor.findOne({ referralCode: code }).select('_id').lean();
+      if (!existing) {
+        this.referralCode = code;
+        break;
+      }
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Ensure referralCode is unique when set

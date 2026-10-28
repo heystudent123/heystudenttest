@@ -32,7 +32,7 @@ exports.getMyEnrollments = async (req, res, next) => {
       isActive: true,
     })
       .sort({ enrolledAt: -1 })
-      .populate('courseId', 'title');
+      .populate('courseId', 'title subtitle description category duration level instructor image');
 
     res.status(200).json({
       success: true,

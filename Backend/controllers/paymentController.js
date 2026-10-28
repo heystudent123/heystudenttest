@@ -5,9 +5,17 @@ const Enrollment = require('../models/Enrollment');
 const ErrorResponse = require('../utils/errorResponse');
 const EmailUser = require('../models/EmailUser');
 const Course = require('../models/Course');
+const Plan = require('../models/Plan');
+const MockTest = require('../models/MockTest');
 const Referral = require('../models/Referral');
 const PrePaymentLead = require('../models/PrePaymentLead');
-const { sanitizeStr, isPositiveNumber, isNonEmpty } = require('../middleware/validate');
+const { sanitizeStr, isPositiveNumber, isNonEmpty, isObjectId } = require('../middleware/validate');
+const { signaturesMatch, capturedMatchesStored } = require('../utils/paymentGuards');
+const { priceAfterReward, priceAfterPercent } = require('../utils/referralReward');
+const ReferralReward = require('../models/ReferralReward');
+const ReferralRewardSetting = require('../models/ReferralRewardSetting');
+const Coupon = require('../models/Coupon');
+const CouponRedemption = require('../models/CouponRedemption');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -30,7 +38,7 @@ const verifySignature = (orderId, paymentId, signature) => {
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(body)
     .digest('hex');
-  return expected === signature;
+  return signaturesMatch(expected, signature);
 };
 
 /**
@@ -39,12 +47,12 @@ const verifySignature = (orderId, paymentId, signature) => {
  */
 const verifyWebhookSignature = (rawBody, signature) => {
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-  if (!secret) return false;
+  if (!secret || rawBody == null || typeof signature !== 'string') return false;
   const expected = crypto
     .createHmac('sha256', secret)
     .update(rawBody)
     .digest('hex');
-  return expected === signature;
+  return signaturesMatch(expected, signature);
 };
 
 /**
@@ -53,6 +61,7 @@ const verifyWebhookSignature = (rawBody, signature) => {
  */
 const applyReferralAttributionForPayment = async (payment) => {
   if (!payment || !payment.userId) return;
+  await consumeReservedReward(payment);
 
   const notesObj = payment.notes instanceof Map
     ? Object.fromEntries(payment.notes)
@@ -62,8 +71,14 @@ const applyReferralAttributionForPayment = async (payment) => {
     ? sanitizeStr(String(notesObj.referralCode)).toUpperCase()
     : '';
 
-  if (!cleanReferralCode) return;
+  if (cleanReferralCode) {
+    await attributeReferralUse(payment, cleanReferralCode);
+  }
+  await grantStudentReferralReward(payment);
+  await recordCouponRedemption(payment);
+};
 
+const attributeReferralUse = async (payment, cleanReferralCode) => {
   const [buyer, referrer] = await Promise.all([
     EmailUser.findById(payment.userId),
     EmailUser.findOne({ referralCode: cleanReferralCode, role: 'institute' })
@@ -106,12 +121,219 @@ const applyReferralAttributionForPayment = async (payment) => {
   );
 };
 
+const noteValue = (payment, key) => {
+  const notesObj = payment.notes instanceof Map
+    ? Object.fromEntries(payment.notes)
+    : (payment.notes && typeof payment.notes === 'object' ? payment.notes : {});
+  return notesObj?.[key] ? sanitizeStr(String(notesObj[key])).toUpperCase() : '';
+};
+
+const releaseAbandonedRewards = async (userId) => {
+  const reserved = await ReferralReward.find({ referrerId: userId, status: 'reserved' });
+  const staleBefore = Date.now() - 10 * 60 * 1000;
+  for (const credit of reserved) {
+    if (!credit.reservedPaymentId) {
+      if (new Date(credit.updatedAt).getTime() > staleBefore) continue;
+      credit.status = 'available';
+      await credit.save();
+      continue;
+    }
+    const payment = await Payment.findById(credit.reservedPaymentId).select('status');
+    if (!payment || payment.status !== 'paid') {
+      credit.status = 'available';
+      credit.reservedPaymentId = null;
+      await credit.save();
+    }
+  }
+};
+
+const claimNextReward = async (userId) => {
+  await releaseAbandonedRewards(userId);
+  return ReferralReward.findOneAndUpdate(
+    { referrerId: userId, status: 'available' },
+    { $set: { status: 'reserved' } },
+    { sort: { createdAt: 1 }, new: true }
+  );
+};
+
+const releaseClaimedReward = async (credit) => {
+  if (!credit) return;
+  await ReferralReward.updateOne(
+    { _id: credit._id, status: 'reserved', reservedPaymentId: null },
+    { $set: { status: 'available' } }
+  );
+};
+
+const consumeReservedReward = async (payment) => {
+  if (!payment?._id) return;
+  await ReferralReward.updateOne(
+    { reservedPaymentId: payment._id, status: 'reserved' },
+    { $set: { status: 'used', usedPaymentId: payment._id } }
+  );
+};
+
+const noteRaw = (payment, key) => {
+  const notesObj = payment.notes instanceof Map
+    ? Object.fromEntries(payment.notes)
+    : (payment.notes && typeof payment.notes === 'object' ? payment.notes : {});
+  return notesObj?.[key] ? String(notesObj[key]) : '';
+};
+
+const recordCouponRedemption = async (payment) => {
+  const couponId = noteRaw(payment, 'couponId');
+  if (!couponId || !isObjectId(couponId)) return;
+  try {
+    await CouponRedemption.create({
+      couponId,
+      userId: payment.userId,
+      paymentId: payment._id,
+    });
+  } catch (err) {
+    if (err?.code !== 11000) throw err;
+  }
+};
+
+const resolveReferralCode = async (code, buyerId) => {
+  if (!code) return { kind: null };
+  const owner = await EmailUser.findOne({ referralCode: code.toUpperCase() }).select('_id role referralCode');
+  if (!owner || String(owner._id) === String(buyerId) || (owner.role !== 'institute' && owner.role !== 'student')) {
+    return { error: 'That referral code is not valid.' };
+  }
+  return { kind: owner.role, code: owner.referralCode };
+};
+
+const resolveCoupon = async (code, buyerId, purpose, itemId) => {
+  if (!code) return { coupon: null };
+  const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true });
+  if (!coupon) return { error: 'That coupon code is not valid.' };
+  if (coupon.expiresAt && coupon.expiresAt.getTime() < Date.now()) return { error: 'That coupon has expired.' };
+  const id = String(itemId || '');
+  const allowed = purpose === 'course_enrollment'
+    ? (coupon.courseIds || []).some((courseId) => String(courseId) === id)
+    : purpose === 'plan'
+      ? (coupon.planIds || []).some((planId) => String(planId) === id)
+      : (coupon.mockTestIds || []).some((testId) => String(testId) === id);
+  if (!allowed) return { error: 'That coupon does not apply to this purchase.' };
+  const used = await CouponRedemption.countDocuments({ couponId: coupon._id, userId: buyerId });
+  if (used >= coupon.maxUsesPerUser) return { error: 'You have already used this coupon the allowed number of times.' };
+  return { coupon };
+};
+
+const grantStudentReferralReward = async (payment) => {
+  const code = noteValue(payment, 'studentReferralCode');
+  if (!code) return;
+  if (!['course_enrollment', 'plan', 'mock_test'].includes(payment.purpose)) return;
+  const [buyer, referrer, setting] = await Promise.all([
+    EmailUser.findById(payment.userId).select('_id'),
+    EmailUser.findOne({ referralCode: code, role: 'student' }).select('_id'),
+    ReferralRewardSetting.findOne({ key: 'student' }).select('discountPercent'),
+  ]);
+  if (!buyer || !referrer) return;
+  if (String(referrer._id) === String(buyer._id)) return;
+  const percent = Number(setting?.discountPercent) || 0;
+  if (!(percent > 0)) return;
+  try {
+    await ReferralReward.create({
+      referrerId: referrer._id,
+      percent,
+      earnedFromPaymentId: payment._id,
+      earnedFromUserId: buyer._id,
+    });
+  } catch (err) {
+    if (err?.code !== 11000) throw err;
+  }
+};
+
+const enrollCourse = async (payment, courseId) => {
+  return Enrollment.findOneAndUpdate(
+    { userId: payment.userId, courseSlug: String(courseId) },
+    {
+      userId: payment.userId,
+      courseSlug: String(courseId),
+      courseId,
+      paymentId: payment._id,
+      razorpayOrderId: payment.razorpayOrderId,
+      amountPaid: payment.amount,
+      isActive: true,
+      enrolledAt: new Date(),
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+};
+
+/**
+ * Grant the access that a paid order bought. Safe to run from both verify
+ * and the webhook: enrollment is an upsert on user + course.
+ */
+const grantPaidAccess = async (payment) => {
+  let enrollment = null;
+  if (!payment) return null;
+
+  if (payment.purpose === 'plan' && payment.purposeId) {
+    const plan = await Plan.findById(payment.purposeId).select('courseIds');
+    for (const courseId of plan?.courseIds || []) {
+      try {
+        enrollment = await enrollCourse(payment, courseId);
+      } catch (enrollErr) {
+        console.error('Plan course enrollment error (non-fatal):', enrollErr.message);
+      }
+    }
+  }
+
+  if (payment.purpose === 'course_enrollment') {
+    if (!payment.purposeId) {
+      console.error('Course payment has no course id; enrollment skipped', payment._id);
+      return enrollment;
+    }
+    try {
+      enrollment = await enrollCourse(payment, payment.purposeId);
+    } catch (enrollErr) {
+      console.error('Auto-enrollment error (non-fatal):', enrollErr.message);
+    }
+  }
+
+  return enrollment;
+};
+
+const serverOrderNotes = (clientNotes, serverFields) => {
+  const safeNotes = {};
+  if (clientNotes && typeof clientNotes === 'object' && !Array.isArray(clientNotes)) {
+    for (const [key, value] of Object.entries(clientNotes)) {
+      if (value == null) continue;
+      const cleanKey = sanitizeStr(String(key)).slice(0, 40);
+      if (!cleanKey) continue;
+      safeNotes[cleanKey] = sanitizeStr(String(value)).slice(0, 200);
+    }
+  }
+  return { ...safeNotes, ...serverFields };
+};
+
+const markPaidFromWebhook = async (payment, entity, eventType, paymentId) => {
+  if (!payment) return;
+  if (payment.status === 'refunded' || payment.status === 'partially_refunded') return;
+  if (!capturedMatchesStored(payment, entity)) {
+    console.warn(`Razorpay webhook: captured amount does not match stored order ${payment.razorpayOrderId}`);
+    return;
+  }
+  if (payment.status !== 'paid') {
+    payment.status = 'paid';
+    if (paymentId) payment.razorpayPaymentId = paymentId;
+    payment.paidAt = entity.created_at ? new Date(entity.created_at * 1000) : new Date();
+    payment.webhookVerified = true;
+    payment.webhookEvent = eventType;
+    await payment.save();
+    await applyReferralAttributionForPayment(payment);
+  }
+  await grantPaidAccess(payment);
+};
+
 // ─── Controllers ──────────────────────────────────────────────────────────────
 
 // @desc    Create a Razorpay order
 // @route   POST /api/payments/create-order
 // @access  Private
 exports.createOrder = async (req, res, next) => {
+  let claimedReward = null;
   try {
     const razorpay = getRazorpay();
 
@@ -122,14 +344,12 @@ exports.createOrder = async (req, res, next) => {
       purposeId,        // ObjectId of the related resource
       purposeModel,     // e.g. 'Course'
       courseSlug,       // slug for enrollment lookup
-      referralCode,     // optional institute referral code
+      referralCode,     // one code: server decides student or institute
+      couponCode,       // optional coupon, can be combined with a referral code
       notes = {},       // extra key-value pairs forwarded to Razorpay
     } = req.body;
 
     // ── Input validation ──────────────────────────────────────────────────────
-    if (!isPositiveNumber(amount)) {
-      return next(new ErrorResponse('A valid positive amount is required', 400));
-    }
     if (!purpose || !isNonEmpty(sanitizeStr(String(purpose)))) {
       return next(new ErrorResponse('Payment purpose is required', 400));
     }
@@ -140,42 +360,121 @@ exports.createOrder = async (req, res, next) => {
     }
     const cleanPurpose = sanitizeStr(String(purpose));
     const cleanCourseSlug = courseSlug ? sanitizeStr(String(courseSlug)) : undefined;
-    const cleanReferralCode = referralCode ? sanitizeStr(String(referralCode)) : undefined;
-    // ─────────────────────────────────────────────────────────────────────────
+    const cleanReferralCode = referralCode ? sanitizeStr(String(referralCode)) : '';
+    const cleanCouponCode = couponCode ? sanitizeStr(String(couponCode)) : '';
+    const serverPriced = cleanPurpose === 'course_enrollment' || cleanPurpose === 'plan' || cleanPurpose === 'mock_test';
+    if (serverPriced && cleanCurrency !== 'INR') {
+      return next(new ErrorResponse('Only INR payments are accepted', 400));
+    }
 
-    // ── Referral code: validate and apply referral price if available ──
     let finalAmount = amount;
-    let appliedReferralCode = null;
-    if (cleanReferralCode && cleanPurpose === 'course_enrollment') {
-      const institute = await EmailUser.findOne({ referralCode: cleanReferralCode, role: 'institute' });
-      if (institute) {
-        // Look up the course's referralPrice
-        const courseQuery = purposeId
-          ? { _id: purposeId }
-          : { _id: cleanCourseSlug };
-        const course = await Course.findOne(courseQuery);
-        if (course && course.referralPrice && course.referralPrice > 0) {
-          finalAmount = course.referralPrice;
-        }
-        appliedReferralCode = cleanReferralCode;
+    let resolvedPurposeId = purposeId || null;
+    let resolvedPurposeModel = purposeModel || null;
+    let courseForOrder = null;
+    // The courses page sends the course's Mongo _id as `courseSlug`. The price
+    // and the course that gets enrolled both come from that record.
+    if (cleanPurpose === 'course_enrollment') {
+      const slugId = cleanCourseSlug && isObjectId(cleanCourseSlug) ? String(cleanCourseSlug) : null;
+      const bodyId = purposeId && isObjectId(purposeId) ? String(purposeId) : null;
+      if (slugId && bodyId && slugId !== bodyId) {
+        return next(new ErrorResponse('Choose a valid course to buy.', 400));
       }
+      const courseId = slugId || bodyId;
+      if (!courseId) return next(new ErrorResponse('Choose a valid course to buy.', 400));
+      courseForOrder = await Course.findById(courseId);
+      if (!courseForOrder || courseForOrder.isActive === false) {
+        return next(new ErrorResponse('This course is not for sale.', 404));
+      }
+      if (!(courseForOrder.price > 0)) {
+        return next(new ErrorResponse('This course has no price.', 400));
+      }
+      finalAmount = courseForOrder.price;
+      resolvedPurposeId = courseForOrder._id;
+      resolvedPurposeModel = 'Course';
+    }
+    if (cleanPurpose === 'plan' || cleanPurpose === 'mock_test') {
+      if (!isObjectId(purposeId)) return next(new ErrorResponse('Choose a valid item to buy.', 400));
+      if (cleanPurpose === 'plan') {
+        const plan = await Plan.findById(purposeId);
+        if (!plan || plan.status !== 'published') return next(new ErrorResponse('This plan is not for sale.', 404));
+        finalAmount = plan.price;
+        resolvedPurposeModel = 'Plan';
+      } else {
+        const test = await MockTest.findById(purposeId);
+        if (!test || test.status !== 'published' || test.isFree) {
+          return next(new ErrorResponse('This mock test is not for sale.', 404));
+        }
+        if (!(test.price > 0)) return next(new ErrorResponse('This mock test has no price.', 400));
+        finalAmount = test.price;
+        resolvedPurposeModel = 'MockTest';
+      }
+    }
+
+    const listPrice = Number(finalAmount) || 0;
+    let appliedReferralCode = null;
+    let appliedStudentCode = null;
+    let appliedCoupon = null;
+    if (serverPriced && cleanReferralCode) {
+      const resolved = await resolveReferralCode(cleanReferralCode, req.user._id);
+      if (resolved.error) return next(new ErrorResponse(resolved.error, 400));
+      if (resolved.kind === 'institute') {
+        appliedReferralCode = resolved.code;
+        const setting = await ReferralRewardSetting.findOne({ key: 'student' }).select('instituteDiscountPercent');
+        const percent = Number(setting?.instituteDiscountPercent) || 0;
+        if (percent > 0) finalAmount = priceAfterPercent(finalAmount, percent);
+      } else if (resolved.kind === 'student') {
+        appliedStudentCode = resolved.code;
+      }
+    }
+    if (serverPriced && cleanCouponCode) {
+      const resolvedCoupon = await resolveCoupon(cleanCouponCode, req.user._id, cleanPurpose, resolvedPurposeId);
+      if (resolvedCoupon.error) return next(new ErrorResponse(resolvedCoupon.error, 400));
+      appliedCoupon = resolvedCoupon.coupon;
+      if (appliedCoupon) {
+        finalAmount = appliedCoupon.discountType === 'percent'
+          ? priceAfterPercent(finalAmount, appliedCoupon.discountValue)
+          : priceAfterReward(finalAmount, appliedCoupon.discountValue);
+      }
+    }
+
+    let rewardDiscount = 0;
+    if (serverPriced && req.user.role === 'student') {
+      claimedReward = await claimNextReward(req.user._id);
+      if (claimedReward) {
+        const discounted = claimedReward.percent > 0
+          ? priceAfterPercent(finalAmount, claimedReward.percent)
+          : priceAfterReward(finalAmount, claimedReward.amount);
+        rewardDiscount = Math.round((finalAmount - discounted) * 100) / 100;
+        finalAmount = discounted;
+      }
+    }
+    rewardDiscount = Math.max(0, Math.round((listPrice - finalAmount) * 100) / 100);
+
+    if (!isPositiveNumber(finalAmount)) {
+      await releaseClaimedReward(claimedReward);
+      return next(new ErrorResponse('A valid positive amount is required', 400));
     }
 
     const amountInPaise = Math.round(finalAmount * 100);
     const receipt = generateReceipt(cleanPurpose);
+    const orderNotes = serverOrderNotes(notes, {
+      userId: req.user._id.toString(),
+      purpose: cleanPurpose,
+      courseSlug: cleanPurpose === 'course_enrollment' && resolvedPurposeId
+        ? String(resolvedPurposeId)
+        : (cleanCourseSlug || ''),
+      referralCode: appliedReferralCode || '',
+      studentReferralCode: appliedStudentCode || '',
+      couponCode: appliedCoupon ? appliedCoupon.code : '',
+      couponId: appliedCoupon ? String(appliedCoupon._id) : '',
+    });
 
     // Create order on Razorpay
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: cleanCurrency,
       receipt,
-      notes: {
-        userId: req.user._id.toString(),
-        purpose: cleanPurpose,
-        courseSlug: cleanCourseSlug || '',
-        referralCode: appliedReferralCode || '',
-        ...notes,
-      },
+      notes: orderNotes,
     });
 
     // Persist to DB
@@ -185,13 +484,18 @@ exports.createOrder = async (req, res, next) => {
       amountInRupees: finalAmount,
       currency: cleanCurrency,
       purpose: cleanPurpose,
-      purposeId: purposeId || null,
-      purposeModel: purposeModel || null,
+      purposeId: resolvedPurposeId,
+      purposeModel: resolvedPurposeModel,
       userId: req.user._id,
       receipt,
-      notes: { courseSlug: cleanCourseSlug || '', referralCode: appliedReferralCode || '', ...notes },
+      notes: orderNotes,
       status: 'created',
     });
+
+    if (claimedReward) {
+      claimedReward.reservedPaymentId = payment._id;
+      await claimedReward.save();
+    }
 
     res.status(201).json({
       success: true,
@@ -207,11 +511,41 @@ exports.createOrder = async (req, res, next) => {
         // Referral info
         referralApplied: !!appliedReferralCode,
         finalAmountInRupees: finalAmount,
+        rewardDiscount,
       },
     });
   } catch (err) {
+    await releaseClaimedReward(claimedReward);
     console.error('Razorpay createOrder error:', err);
     next(new ErrorResponse(err.message || 'Failed to create payment order', 500));
+  }
+};
+
+// @desc    Mark an unpaid checkout closed by the student as failed
+// @route   POST /api/payments/cancel
+// @access  Private
+exports.cancelCheckout = async (req, res, next) => {
+  try {
+    const razorpayOrderId = sanitizeStr(String(req.body?.razorpayOrderId || ''));
+    if (!razorpayOrderId) return next(new ErrorResponse('Order is required', 400));
+    const payment = await Payment.findOne({ razorpayOrderId, userId: req.user._id });
+    if (!payment) return next(new ErrorResponse('Payment not found', 404));
+    if (payment.status === 'paid' || payment.status === 'refunded' || payment.status === 'partially_refunded') {
+      return res.status(200).json({ success: true, data: { status: payment.status } });
+    }
+    if (payment.status === 'created' || payment.status === 'attempted') {
+      payment.status = 'failed';
+      payment.failedAt = new Date();
+      payment.failureReason = 'Checkout closed before payment';
+      await payment.save();
+      await ReferralReward.updateOne(
+        { reservedPaymentId: payment._id, status: 'reserved' },
+        { $set: { status: 'available', reservedPaymentId: null } }
+      );
+    }
+    res.status(200).json({ success: true, data: { status: payment.status } });
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -255,30 +589,7 @@ exports.verifyPayment = async (req, res, next) => {
     await payment.save();
 
     await applyReferralAttributionForPayment(payment);
-
-    // Auto-enroll if this was a course enrollment payment
-    let enrollment = null;
-    if (payment.purpose === 'course_enrollment') {
-      const courseSlug = payment.notes?.get('courseSlug') || 'du-campus-advantage';
-      try {
-        enrollment = await Enrollment.findOneAndUpdate(
-          { userId: payment.userId, courseSlug },
-          {
-            userId: payment.userId,
-            courseSlug,
-            courseId: payment.purposeId || null,
-            paymentId: payment._id,
-            razorpayOrderId: payment.razorpayOrderId,
-            amountPaid: payment.amount,
-            isActive: true,
-            enrolledAt: new Date(),
-          },
-          { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-      } catch (enrollErr) {
-        console.error('Auto-enrollment error (non-fatal):', enrollErr.message);
-      }
-    }
+    const enrollment = await grantPaidAccess(payment);
 
     res.status(200).json({
       success: true,
@@ -312,15 +623,7 @@ exports.handleWebhook = async (req, res) => {
       case 'payment.captured': {
         const rp = event.payload.payment.entity;
         const payment = await Payment.findOne({ razorpayOrderId: rp.order_id });
-        if (payment && payment.status !== 'paid') {
-          payment.status = 'paid';
-          payment.razorpayPaymentId = rp.id;
-          payment.paidAt = new Date(rp.created_at * 1000);
-          payment.webhookVerified = true;
-          payment.webhookEvent = eventType;
-          await payment.save();
-          await applyReferralAttributionForPayment(payment);
-        }
+        await markPaidFromWebhook(payment, rp, eventType, rp.id);
         break;
       }
 
@@ -345,13 +648,7 @@ exports.handleWebhook = async (req, res) => {
       case 'order.paid': {
         const order = event.payload.order.entity;
         const payment = await Payment.findOne({ razorpayOrderId: order.id });
-        if (payment && payment.status !== 'paid') {
-          payment.status = 'paid';
-          payment.webhookVerified = true;
-          payment.webhookEvent = eventType;
-          await payment.save();
-          await applyReferralAttributionForPayment(payment);
-        }
+        await markPaidFromWebhook(payment, order, eventType);
         break;
       }
 
@@ -405,8 +702,7 @@ exports.handleWebhook = async (req, res) => {
     res.status(200).json({ success: true, received: true });
   } catch (err) {
     console.error('Razorpay webhook processing error:', err);
-    // Always return 200 to Razorpay so it doesn't retry indefinitely
-    res.status(200).json({ success: false, message: 'Webhook processing error (logged)' });
+    res.status(500).json({ success: false, message: 'Webhook processing error' });
   }
 };
 
@@ -432,13 +728,38 @@ exports.getMyPayments = async (req, res, next) => {
       Payment.countDocuments(filter),
     ]);
 
+    // Resolve a human-readable title for each payment's purchased item.
+    // purposeModel tells us which collection purposeId points into.
+    const modelByName = { Course, Plan, MockTest };
+    const idsByModel = {};
+    payments.forEach((p) => {
+      if (p.purposeId && p.purposeModel && modelByName[p.purposeModel]) {
+        idsByModel[p.purposeModel] = idsByModel[p.purposeModel] || new Set();
+        idsByModel[p.purposeModel].add(String(p.purposeId));
+      }
+    });
+    const titleById = {};
+    await Promise.all(
+      Object.entries(idsByModel).map(async ([modelName, idSet]) => {
+        const docs = await modelByName[modelName]
+          .find({ _id: { $in: Array.from(idSet) } })
+          .select('title')
+          .lean();
+        docs.forEach((doc) => { titleById[String(doc._id)] = doc.title; });
+      })
+    );
+    const dataWithTitles = payments.map((p) => ({
+      ...p,
+      purposeTitle: p.purposeId ? (titleById[String(p.purposeId)] || null) : null,
+    }));
+
     res.status(200).json({
       success: true,
       count: payments.length,
       total,
       page: Number(page),
       pages: Math.ceil(total / Number(limit)),
-      data: payments,
+      data: dataWithTitles,
     });
   } catch (err) {
     next(err);
@@ -784,4 +1105,38 @@ exports.getAllLeads = async (req, res, next) => {
 exports.markLeadConverted = async (leadId) => {
   if (!leadId) return;
   await PrePaymentLead.findByIdAndUpdate(leadId, { converted: true }).catch(() => {});
+};
+
+// @desc    Manually set a lead's converted status
+// @route   PUT /api/payments/leads/:id/converted
+// @access  Private/Admin
+exports.setLeadConverted = async (req, res, next) => {
+  try {
+    const { converted } = req.body || {};
+    if (typeof converted !== 'boolean') {
+      return next(new ErrorResponse('converted must be true or false', 400));
+    }
+    const lead = await PrePaymentLead.findByIdAndUpdate(
+      req.params.id,
+      { $set: { converted } },
+      { new: true }
+    );
+    if (!lead) return next(new ErrorResponse('Lead not found', 404));
+    res.status(200).json({ success: true, data: lead });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Delete a lead
+// @route   DELETE /api/payments/leads/:id
+// @access  Private/Admin
+exports.deleteLead = async (req, res, next) => {
+  try {
+    const lead = await PrePaymentLead.findByIdAndDelete(req.params.id);
+    if (!lead) return next(new ErrorResponse('Lead not found', 404));
+    res.status(200).json({ success: true, data: {} });
+  } catch (err) {
+    next(err);
+  }
 };

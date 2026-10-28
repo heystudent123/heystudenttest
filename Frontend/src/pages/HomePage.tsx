@@ -1,488 +1,338 @@
-import React, { useState, useEffect, useRef, useCallback, ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import Hero from '../components/Hero';
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
+import { ArrowRight, BarChart3, BookOpen, Clock3, FileText, GraduationCap, LineChart, List, Smartphone, Star, Trophy } from 'lucide-react';
 import SharedNavbar from '../components/SharedNavbar';
-import Testimonials from '../components/Testimonials';
-import { FeatureSteps } from '../components/ui/feature-steps';
-import AnimatedTestimonials, { AnimatedTestimonialItem } from '../components/ui/animated-testimonials';
-import { coursesApi } from '../services/api';
 
-interface Course {
-  _id: string;
-  title: string;
-  subtitle?: string;
-  description: string;
-  category: string;
-  duration: string;
-  level: string;
-  instructor?: string;
-  price: number;
-  originalPrice?: number;
-  isPaid: boolean;
-  features?: string[];
-  isActive: boolean;
-}
+const features = [
+  { icon: FileText, title: 'Real Exam Pattern', text: 'Questions as per latest CUET pattern', tint: 'bg-[#EEF0FF] text-[#6B7CFF]' },
+  { icon: Clock3, title: 'Timed Tests', text: 'Improve speed and accuracy', tint: 'bg-[#E7F8EF] text-[#3CB371]' },
+  { icon: BarChart3, title: 'Instant Results', text: 'Detailed analysis and AI insights', tint: 'bg-[#FDECEC] text-[#F08A8A]' },
+  { icon: List, title: 'Topic-wise Tests', text: 'Practice by subject and chapter', tint: 'bg-[#FFF6D8] text-[#D4A017]' },
+];
 
-/* ── Scroll-reveal wrapper ─────────────────────────────────────── */
-const FadeIn: React.FC<{ children: ReactNode; delay?: number; className?: string }> = ({
-  children, delay = 0, className = ''
-}) => {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          el.style.transitionDelay = `${delay}ms`;
-          el.classList.add('opacity-100', 'translate-y-0');
-          el.classList.remove('opacity-0', 'translate-y-6');
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.12 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [delay]);
-  return (
-    <div
-      ref={ref}
-      className={`opacity-0 translate-y-6 transition-all duration-700 ease-out ${className}`}
-    >
-      {children}
-    </div>
-  );
-};
+const courses = [
+  { id: 'humanities', title: 'CUET Humanities', text: 'Complete preparation for Domain + Language', image: '/hindu.webp', rating: '4.8', reviews: '2.1K', popular: true, faces: ['/reviews/as.jpg', '/reviews/bs.jpg', '/reviews/cs.jpg'] },
+  { id: 'commerce', title: 'CUET Commerce', text: 'Concepts, practice and previous year questions', image: '/hansraj.webp', rating: '4.8', reviews: '1.6K', popular: false, faces: ['/reviews/ds.jpg', '/reviews/es.jpg', '/reviews/fs.jpg'] },
+  { id: 'science', title: 'CUET Science', text: 'Full coverage with concepts and MCQs', image: '/delhi-university.webp', rating: '4.7', reviews: '1.8K', popular: false, faces: ['/reviews/cs.jpg', '/reviews/fs.jpg', '/reviews/as.jpg'] },
+];
 
-const FACULTY: AnimatedTestimonialItem[] = [
+const reasons = [
+  { icon: GraduationCap, title: 'Expert Guidance', text: 'Learn from experienced CUET mentors', tint: 'bg-[#EEF0FF] text-[#7B88F5]' },
+  { icon: FileText, title: 'Comprehensive Content', text: 'Covers all subjects and topics', tint: 'bg-[#EAF1FF] text-[#6B8CFF]' },
+  { icon: BarChart3, title: 'Performance Analysis', text: 'Track progress and identify weak areas', tint: 'bg-[#FFF1E8] text-[#F0A06A]' },
+  { icon: Smartphone, title: 'Learn Anywhere', text: 'Study on web or mobile, anytime, anywhere', tint: 'bg-[#F3EEFF] text-[#9B8AF5]' },
+];
+
+const founders = [
   {
     name: 'Moksh Jindal',
-    designation: 'AIR 19 · CUET 2023 · Hansraj College, Delhi University',
-    badge: 'AIR 19 · Commerce',
-    src: '/Moksh.jpg',
-    quote:
-      '100 Percentile in English & Economics. BA (Hons) Economics at Hansraj College, DU. My preparation strategy is built around concept clarity with exam precision: understanding what actually gets asked, what can be skipped, and how to maximise marks in minimum time.',
+    role: 'Co-founder and Commerce Faculty',
+    air: 'AIR 19',
+    year: 'CUET 2023',
+    college: 'SRCC, Delhi University',
+    quote: "We started HeyStudent because we kept seeing the same questions in juniors' CUET exams. Our goal is to make CUET preparation simpler and more effective for every student.",
+    photo: '/moksh.webp',
+    badge: 'bg-[#EAF2FF]',
+    trophy: '#3267f5',
   },
   {
     name: 'Naman Kumar',
-    designation: 'AIR 63 · CUET · Hindu College, Delhi University',
-    badge: 'AIR 63 · Commerce',
-    src: '/Naman.jpeg',
-    quote:
-      '99.2 Percentile in Accountancy. 98.9 Percentile in Business Studies. B.Com (Hons) at Hindu College, DU. I teach smart Accountancy solving frameworks, Business Studies scoring strategy, and structured revision systems. Not theory, execution.',
+    role: 'Co-founder and Humanities Faculty',
+    air: 'AIR 63',
+    year: 'CUET 2023',
+    college: 'Hindu College, Delhi University',
+    quote: 'Having gone through the entire CUET journey ourselves, we understand what students actually need. HeyStudent is our way of giving back and helping you prepare smarter.',
+    photo: '/naman.webp',
+    badge: 'bg-[#FBF6E8]',
+    trophy: '#E8A317',
   },
 ];
 
-const DEFAULT_FEATURES = [
-  'Live weekly classes: Commerce & Humanities',
-  'General Test: GK, English & Reasoning',
-  '20+ full-length CUET-pattern mock tests',
-  'Weekly doubt-clearing with faculty',
-  'Chapter-wise PDF notes for all subjects',
-  'Complete PYQ analysis & solutions',
-  'Rank tracker after every mock',
-  'Private student community access',
-];
-
 const HomePage: React.FC = () => {
-  const contentStyle: React.CSSProperties = { paddingTop: '64px' };
-  const [courses, setCourses] = useState<Course[]>([]);
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    coursesApi.getAll({ isActive: true })
-      .then((res) => setCourses(res.data || res.courses || []))
-      .catch(() => {});
-  }, []);
-
-  // Clicking "Enroll Now" → store intent, go to CoursesPage which handles the full flow
-  const handleHomeEnroll = () => {
-    sessionStorage.setItem('autoEnroll', 'true');
-    navigate('/courses');
-  };
-
   return (
-    <div className="min-h-screen w-full" style={{ background: '#fff9ed' }}>
+    <div className="hs-page">
+      <Helmet>
+        <title>HeyStudent — CUET Mock Tests & Expert Courses</title>
+        <meta name="description" content="Prepare for CUET with real exam-pattern mock tests, instant results, and expert-led courses in Commerce, Arts and more." />
+        <link rel="canonical" href="https://heystudent.in/" />
+      </Helmet>
       <SharedNavbar />
 
-      <div style={contentStyle}>
-        <Hero className="relative min-h-[70vh] overflow-hidden" />
-
-        {/* ── WHY HEYSTUDENT ──────────────────────────────────────── */}
-        <FadeIn>
-          <section className="py-20 md:py-28 px-4" style={{ background: '#fff9ed' }}>
-            <div className="max-w-5xl mx-auto">
-              <div className="text-center mb-14">
-                <p className="text-xs font-bold tracking-widest uppercase text-amber-600 mb-3">Why Heystudent?</p>
-                <h2 className="text-3xl md:text-4xl font-bold text-black mb-4">Because your preparation deserves<br />more than random YouTube videos.</h2>
-                <p className="text-neutral-500 max-w-xl mx-auto text-base leading-relaxed">
-                  Heystudent is built by All India Rankers, students currently studying in SRCC, Hindu &amp; Hansraj, and a team that has analysed 3 years of CUET trends.
-                </p>
-              </div>
-              <div className="grid md:grid-cols-2 gap-6">
-                {/* Left: What we teach */}
-                <div className="bg-black rounded-3xl p-8 flex flex-col">
-                  <p className="text-xs font-bold tracking-widest uppercase text-amber-400 mb-3">What We Teach</p>
-                  <h3 className="text-xl font-bold text-white mb-5">We don't teach chapters.</h3>
-                  <ul className="space-y-4">
-                    {[
-                      { icon: '🎯', text: 'What actually gets asked' },
-                      { icon: '⏭️', text: 'What can be skipped' },
-                      { icon: '⚡', text: 'What gives maximum marks in minimum time' },
-                      { icon: '🧠', text: 'How to structure preparation strategically' },
-                    ].map(({ icon, text }) => (
-                      <li key={text} className="flex items-start gap-3 text-neutral-300 text-sm">
-                        <span className="text-lg leading-none mt-0.5">{icon}</span>
-                        <span>{text}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                {/* Right: What makes us different */}
-                <div className="bg-amber-400 rounded-3xl p-8 flex flex-col">
-                  <p className="text-xs font-bold tracking-widest uppercase text-black/60 mb-3">What Makes Us Different</p>
-                  <h3 className="text-xl font-bold text-black mb-2">While others teach everything, we decode what matters.</h3>
-                  <p className="text-black/70 text-sm mb-5">That edge is the difference between a good score and SRCC.</p>
-                  <ul className="space-y-3">
-                    {[
-                      { icon: '🔍', text: 'Analyse previous year papers deeply' },
-                      { icon: '📊', text: 'Identify high-probability patterns' },
-                      { icon: '🎯', text: 'Predict high-probability areas' },
-                      { icon: '🧠', text: 'Train you for smart attempt strategy' },
-                    ].map(({ icon, text }) => (
-                      <li key={text} className="flex items-start gap-3 text-black text-sm font-medium">
-                        <span className="text-lg leading-none mt-0.5">{icon}</span>
-                        <span>{text}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </section>
-        </FadeIn>
-
-        {/* ── WHAT'S INCLUDED ──────────────────────────────────────── */}
-        <FadeIn>
-          <FeatureSteps
-            title="Everything included in one batch."
-            autoPlayInterval={4500}
-            className="bg-[#fff9ed]"
-            features={[
-              {
-                step: 'Live Classes',
-                title: 'Live Interactive Classes',
-                content:
-                  'Complete syllabus covered live by AIR rankers. We solve Previous Year Questions in real-time and decode exactly what you can expect this year, recorded for replay anytime.',
-                image:
-                  'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1171&q=80',
-              },
-              {
-                step: 'Trend Analysis',
-                title: 'Deep CUET Trend Analysis',
-                content:
-                  '3 years of CUET trends broken down. We identify high-probability topics, repeated patterns, and subject-wise scoring behaviour so you never study the wrong things.',
-                image:
-                  'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=1170&q=80',
-              },
-              {
-                step: 'Mentorship',
-                title: 'Personal Mentorship from DU Students',
-                content:
-                  'Direct guidance from students at SRCC, Hindu and Hansraj. College preference strategy, cut-off navigation, and real exam-day mindset from people who lived it.',
-                image:
-                  'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&w=1170&q=80',
-              },
-              {
-                step: 'Strategy Sessions',
-                title: 'Exclusive Ranker Strategy Sessions',
-                content:
-                  'All India Rankers share their real exam-day approaches: how to attempt smartly under pressure, manage time, and convert preparation into percentile.',
-                image:
-                  'https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=1170&q=80',
-              },
-            ]}
-          />
-        </FadeIn>
-
-        {/* ── PRICING CARD ─────────────────────────────────────────── */}
-        <section className="py-10 md:py-16 px-4" style={{ background: '#fff9ed' }}>
-          <div className="max-w-2xl mx-auto md:px-14">
-            <FadeIn>
-              <div className="text-center mb-6">
-                <p className="text-xs font-bold tracking-widest uppercase text-amber-600 mb-2">Pricing</p>
-                <h2 className="text-2xl md:text-3xl font-bold text-black">Exam Decoders Batch</h2>
-                <p className="text-neutral-500 mt-1 text-sm">Decode the Pattern. Master the Strategy. Dominate the Exam.</p>
-              </div>
-            </FadeIn>
-
-            <FadeIn delay={100}>
-              <HomePricingCarousel courses={courses} defaultFeatures={DEFAULT_FEATURES} onEnroll={handleHomeEnroll} />
-            </FadeIn>
-          </div>
-        </section>
-
-        {/* ── WhatsApp Free Resources Banner ──────────────────────────────── */}
-        <div className="w-full bg-[#25D366] px-4 py-3">
-          <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <svg className="w-6 h-6 text-white shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-              </svg>
-              <p className="text-white font-bold text-sm">Join our <span className="underline underline-offset-2">Free Resources</span> WhatsApp group for notes, PYQs &amp; more!</p>
-            </div>
-            <a
-              href="https://chat.whatsapp.com/Jiy3lsVbecL52QoQwNVl03?mode=hqctcli"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 bg-white text-[#25D366] font-extrabold text-xs px-4 py-2 rounded-xl hover:bg-green-50 transition-colors whitespace-nowrap"
-            >
-              Join Free Group →
-            </a>
-          </div>
-        </div>
-
-        {/* ── FACULTY ──────────────────────────────────────────────── */}
-        <section className="py-20 md:py-28 px-4 bg-white">
-          <div className="max-w-4xl mx-auto">
-            <FadeIn>
-              <div className="text-center mb-6">
-                <p className="text-xs font-bold tracking-widest uppercase text-amber-600 mb-3">Meet The Founding Team</p>
-                <h2 className="text-3xl md:text-4xl font-bold text-black">You are not learning from someone<br/>who "heard about CUET."</h2>
-                <p className="text-neutral-500 mt-3 max-w-lg mx-auto">
-                  You are learning from those who lived it, cracked it, and analysed it, and came back to build a system around it.
-                </p>
-              </div>
-            </FadeIn>
-            <AnimatedTestimonials testimonials={FACULTY} autoplay />
-          </div>
-        </section>
-
-        {/* ── TESTIMONIALS ─────────────────────────────────────────── */}
-        <FadeIn>
-          <Testimonials />
-        </FadeIn>
-
-        {/* ── FINAL CTA ────────────────────────────────────────────── */}
-        <FadeIn>
-          <section className="py-20 md:py-28 px-4 bg-black">
-            <div className="max-w-2xl mx-auto text-center">
-              <p className="text-xs font-bold tracking-widest uppercase text-amber-400 mb-4">The Reality</p>
-              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-                Every year, lakhs prepare.<br />Very few understand the pattern.
-              </h2>
-              <p className="text-neutral-400 mb-3 text-base leading-relaxed">
-                Most students realise what they should have done, after results.
-              </p>
-              <p className="text-neutral-300 mb-10 text-lg font-medium">
-                We don't want that to be you.
-              </p>
-              <Link
-                to="/courses"
-                className="inline-block bg-amber-400 hover:bg-amber-300 text-black font-bold px-10 py-4 rounded-2xl text-base transition-colors"
-              >
-                Explore
+      <section className="hs-hero flex w-full max-w-full items-center bg-white px-6 pb-6 pt-4 lg:px-10">
+        <div className="grid w-full min-w-0 items-center gap-6 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="min-w-0 text-left lg:pl-16 xl:pl-24">
+            <p className="hs-hero-eyebrow">CUET preparation made simple</p>
+            <h1 className="mt-4">
+              <span className="block whitespace-nowrap">Your CUET</span>
+              <span className="accent block whitespace-nowrap">Success Partner</span>
+            </h1>
+            <p className="hs-hero-description mt-5 max-w-[520px]">
+              Practice with real exam pattern mock tests, learn from expert courses, and track your progress — all in one place.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link to="/mock-tests" className="hs-hero-button inline-flex items-center gap-2 rounded-md bg-[#111827] px-5 py-3 text-white">
+                Explore Mock Tests <ArrowRight size={16} />
               </Link>
-              <p className="text-neutral-600 text-sm mt-4">Not theory. Not guesswork. Just strategy + execution.</p>
+              <Link to="/courses" className="hs-hero-button inline-flex items-center rounded-md border border-[#D0D5DD] bg-white px-5 py-3 text-[#101828]">
+                View Courses
+              </Link>
             </div>
-          </section>
-        </FadeIn>
-
-
-      </div>
-    </div>
-  );
-};
-
-/* ── Home Pricing Card ──────────────────────────────────────── */
-const HomePricingCard: React.FC<{ course: Course; defaultFeatures: string[]; onEnroll: () => void }> = ({ course, defaultFeatures, onEnroll }) => {
-  const [showAll, setShowAll] = useState(false);
-  const allFeatures = course.features?.length ? course.features : defaultFeatures;
-  const SHOW = 5;
-  const visibleFeatures = showAll ? allFeatures : allFeatures.slice(0, SHOW);
-  const overflowCount = allFeatures.length - SHOW;
-  const hasSavings = (course.originalPrice ?? 0) > course.price;
-
-  return (
-    <div
-      className="group relative bg-[#0d0d0d] rounded-2xl overflow-hidden border border-white/10 hover:border-amber-400/40 transition-all duration-300 hover:shadow-[0_0_40px_rgba(251,191,36,0.13)]"
-      style={{ boxShadow: '0 6px 32px rgba(0,0,0,0.45)' }}
-    >
-      <div className="h-1 w-full bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500" />
-      <div className="p-6 md:p-10">
-        {/* Title */}
-        <div className="mb-4">
-          <h3 className="text-white font-extrabold text-lg md:text-2xl leading-tight text-center">{course.title}</h3>
-        </div>
-        {hasSavings && (
-          <div className="flex justify-center mb-2">
-            <span className="text-xs font-bold text-green-400 bg-green-400/10 border border-green-400/20 px-2.5 py-1 rounded-full whitespace-nowrap">
-              Save ₹{((course.originalPrice ?? 0) - course.price).toLocaleString('en-IN')}
-            </span>
+            <div className="mt-6 flex items-center gap-3">
+              <div className="flex -space-x-2">
+                {founders.map((person) => (
+                  <img key={person.name} src={person.photo} alt="" width={32} height={32} className="h-8 w-8 rounded-full border-2 border-white object-cover" />
+                ))}
+              </div>
+              <p className="hs-hero-proof">Built by AIR 19 and AIR 63 CUET rankers</p>
+            </div>
           </div>
-        )}
 
-        {/* Price row */}
-        <div className="flex items-end gap-3 mb-5" style={{ filter: 'drop-shadow(0 0 18px rgba(251,191,36,0.25))' }}>
-          <span className="text-5xl md:text-6xl font-black text-white tracking-tight">₹{course.price.toLocaleString('en-IN')}</span>
-          {hasSavings && (
-            <span className="text-xl text-neutral-500 line-through mb-2">₹{(course.originalPrice ?? 0).toLocaleString('en-IN')}</span>
-          )}
-          <span className="text-neutral-500 text-sm mb-2 ml-1">one-time</span>
-        </div>
-
-        {/* CTA */}
-        <button
-          onClick={onEnroll}
-          className="group/btn w-full bg-amber-400 hover:bg-amber-300 active:scale-[0.98] text-black font-extrabold text-base py-4 rounded-2xl transition-all duration-200 shadow-[0_4px_20px_rgba(251,191,36,0.3)] hover:shadow-[0_6px_28px_rgba(251,191,36,0.45)] mb-3 flex items-center justify-center gap-2"
-        >
-          <span>Enroll Now</span>
-          <svg className="w-4 h-4 transition-transform duration-200 group-hover/btn:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-
-        {/* Trust */}
-        <div className="flex items-center justify-center gap-1.5 text-neutral-600 text-xs mb-5">
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd"/>
-          </svg>
-          Secured by Razorpay · 100% Safe Checkout
-        </div>
-
-        {/* Divider */}
-        <div className="h-px bg-white/[0.07] mb-5" />
-
-        {/* Features */}
-        <ul className="space-y-3">
-          {visibleFeatures.map(item => (
-            <li key={item} className="flex items-start gap-3 text-neutral-300 text-sm leading-snug">
-              <span className="w-4 h-4 flex-shrink-0 mt-0.5 rounded-full bg-amber-400/15 flex items-center justify-center">
-                <svg className="w-2.5 h-2.5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              </span>
-              {item}
-            </li>
-          ))}
-          {!showAll && overflowCount > 0 && (
-            <li>
-              <button
-                onClick={() => setShowAll(true)}
-                className="flex items-center gap-1.5 text-amber-400 hover:text-amber-300 text-xs font-semibold pl-7 transition-colors"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                </svg>
-                +{overflowCount} more included
-              </button>
-            </li>
-          )}
-          {showAll && (
-            <li>
-              <button
-                onClick={() => setShowAll(false)}
-                className="flex items-center gap-1.5 text-neutral-500 hover:text-neutral-400 text-xs font-semibold pl-7 transition-colors"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-                </svg>
-                Show less
-              </button>
-            </li>
-          )}
-        </ul>
-
-        {/* Footer */}
-        {course.instructor && (
-          <div className="mt-5 pt-5 border-t border-white/[0.06] text-center">
-            <div className="text-[10px] text-neutral-500 uppercase tracking-widest mb-1.5">Faculty</div>
-            <div className="text-white text-base font-extrabold tracking-wide">{course.instructor}</div>
+          <div className="hero-visual-slot justify-self-end">
+            <div className="hero-visual">
+              <img
+                src="/girl%20image.png"
+                alt="Student with books and a backpack"
+                width={310}
+                height={440}
+                fetchPriority="high"
+                className="hero-portrait"
+              />
+              <div className="hero-feature-card hero-feature-card--tests">
+                <span className="hero-feature-icon bg-[#EEF3FF] text-[#4778F5]"><BookOpen size={22} /></span>
+                <span>
+                  <span className="hero-feature-title block">Mock Tests</span>
+                  <span className="hero-feature-description block">Real exam pattern</span>
+                </span>
+              </div>
+              <div className="hero-feature-card hero-feature-card--courses">
+                <span className="hero-feature-icon bg-[#E9F8EF] text-[#1F9D55]"><GraduationCap size={22} /></span>
+                <span>
+                  <span className="hero-feature-title block">Expert Courses</span>
+                  <span className="hero-feature-description block">Learn at your pace</span>
+                </span>
+              </div>
+              <div className="hero-feature-card hero-feature-card--progress">
+                <span className="hero-feature-icon bg-[#FFF4E8] text-[#E07A1F]"><LineChart size={22} /></span>
+                <span>
+                  <span className="hero-feature-title block">Progress Tracking</span>
+                  <span className="hero-feature-description block">Know where you stand</span>
+                </span>
+              </div>
+              <p className="hero-script">Same Goal<br />Higher<br />Possibilities</p>
+            </div>
           </div>
-        )}
-      </div>
-    </div>
-  );
-};
+        </div>
+      </section>
 
-const HomePricingCarousel: React.FC<{ courses: Course[]; defaultFeatures: string[]; onEnroll: () => void }> = ({ courses, defaultFeatures, onEnroll }) => {
-  const paidCourses = courses.filter(c => c.isPaid && c.isActive);
-  const displayCourses = paidCourses.length > 0 ? paidCourses : (courses.length > 0 ? [courses[0]] : []);
-
-  const [idx, setIdx] = useState(0);
-  const touchStartX = useRef<number | null>(null);
-  const touchEndX = useRef<number | null>(null);
-
-  const prev = useCallback(() => setIdx(i => (i - 1 + displayCourses.length) % displayCourses.length), [displayCourses.length]);
-  const next = useCallback(() => setIdx(i => (i + 1) % displayCourses.length), [displayCourses.length]);
-
-  const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    touchEndX.current = e.changedTouches[0].clientX;
-    const diff = (touchStartX.current ?? 0) - (touchEndX.current ?? 0);
-    if (Math.abs(diff) > 40) diff > 0 ? next() : prev();
-  };
-
-  if (displayCourses.length === 0) {
-    const placeholder: Course = { _id: '', title: 'Exam Decoders Batch', subtitle: '', description: '', category: 'Commerce', duration: '3 months', level: 'Beginner', price: 2500, originalPrice: 4999, isPaid: true, isActive: true, features: defaultFeatures };
-    return <HomePricingCard course={placeholder} defaultFeatures={defaultFeatures} onEnroll={onEnroll} />;
-  }
-
-  return (
-    <div className="relative">
-      {/* Desktop side arrows */}
-      {displayCourses.length > 1 && (
-        <button
-          onClick={prev}
-          className="hidden md:flex absolute -left-14 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 border border-white/10 hover:border-amber-400/50 hover:bg-black items-center justify-center transition-all z-10"
-        >
-          <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-      )}
-
-      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-        <HomePricingCard course={displayCourses[idx]} defaultFeatures={defaultFeatures} onEnroll={onEnroll} />
-      </div>
-
-      {/* Desktop side arrows right */}
-      {displayCourses.length > 1 && (
-        <button
-          onClick={next}
-          className="hidden md:flex absolute -right-14 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 border border-white/10 hover:border-amber-400/50 hover:bg-black items-center justify-center transition-all z-10"
-        >
-          <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      )}
-
-      {/* Dots (both mobile and desktop) + mobile arrows */}
-      {displayCourses.length > 1 && (
-        <div className="flex items-center justify-center gap-3 mt-4">
-          {/* Mobile-only arrow left */}
-          <button onClick={prev} className="md:hidden w-8 h-8 rounded-full bg-black/60 border border-white/10 hover:border-amber-400/50 hover:bg-black flex items-center justify-center transition-all">
-            <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <div className="flex gap-1.5">
-            {displayCourses.map((_, i) => (
-              <button key={i} onClick={() => setIdx(i)} className={`rounded-full transition-all duration-200 ${i === idx ? 'w-5 h-1.5 bg-amber-400' : 'w-1.5 h-1.5 bg-white/20 hover:bg-white/40'}`} />
+      <section className="w-full bg-white px-8 py-10 sm:px-14 lg:px-24">
+        <div className="grid items-center gap-10 lg:grid-cols-[minmax(280px,420px)_1fr]">
+          <div className="text-left">
+            <p className="mb-3 flex items-center gap-3 text-[13px] font-bold uppercase tracking-[2px] text-[#94A3B8]">
+              <span>01</span>
+              <span className="h-px w-16 bg-[#D5Dbe3]" />
+              <span>Mock tests</span>
+            </p>
+            <h2 className="mock-title">Practice Like the Real Exam</h2>
+            <p className="mt-4 max-w-[420px] text-left text-[16px] leading-relaxed text-[#64748B]">
+              Full-length and topic-wise mock tests based on the latest CUET pattern with instant results and detailed analysis.
+            </p>
+            <Link to="/mock-tests" className="mt-6 inline-flex items-center gap-2 rounded-md bg-[#111827] px-5 py-3 text-[15px] font-semibold text-white">
+              Explore Mock Tests <ArrowRight size={16} />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
+            {features.map((item) => (
+              <div key={item.title} className="text-center">
+                <span className={`mx-auto flex h-16 w-16 items-center justify-center rounded-2xl ${item.tint}`}><item.icon size={28} strokeWidth={2.2} /></span>
+                <p className="mt-4 text-[16px] font-bold leading-snug text-[#101828]">{item.title}</p>
+                <p className="mt-1 text-[14px] leading-snug text-[#64748B]">{item.text}</p>
+              </div>
             ))}
           </div>
-          {/* Mobile-only arrow right */}
-          <button onClick={next} className="md:hidden w-8 h-8 rounded-full bg-black/60 border border-white/10 hover:border-amber-400/50 hover:bg-black flex items-center justify-center transition-all">
-            <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
         </div>
-      )}
+      </section>
+
+      <section className="w-full bg-white px-8 py-10 sm:px-14 lg:px-24">
+        <div className="grid items-center gap-10 lg:grid-cols-[minmax(280px,420px)_1fr]">
+          <div className="text-left">
+            <p className="mb-3 flex items-center gap-3 text-[13px] font-bold uppercase tracking-[2px] text-[#94A3B8]">
+              <span>02</span>
+              <span className="h-px w-16 bg-[#D5Dbe3]" />
+              <span>CUET courses</span>
+            </p>
+            <h2 className="mock-title">Learn from Expert Courses</h2>
+            <p className="mt-4 max-w-[420px] text-left text-[16px] leading-relaxed text-[#64748B]">
+              Well-structured courses for all CUET subjects, designed by experienced mentors to help you build strong concepts and score higher.
+            </p>
+            <Link to="/courses" className="mt-6 inline-flex items-center gap-2 rounded-md bg-[#111827] px-5 py-3 text-[15px] font-semibold text-white">
+              View Courses <ArrowRight size={16} />
+            </Link>
+          </div>
+          <div className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {courses.map((course) => (
+              <article key={course.id} className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#E8EDF4] bg-white">
+                <div className="relative">
+                  <img src={course.image} alt="" width={640} height={420} loading="lazy" className="h-48 w-full object-cover" />
+                  {course.popular && <span className="absolute left-3 top-3 rounded-full bg-[#F6A15A] px-2.5 py-1 text-[11px] font-semibold text-white">Popular</span>}
+                </div>
+                <div className="flex flex-1 flex-col p-4 text-left">
+                  <p className="text-[16px] font-bold text-[#101828]">{course.title}</p>
+                  <p className="mt-1 flex-1 text-[14px] leading-snug text-[#64748B]">{course.text}</p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <div className="flex -space-x-2">
+                      {course.faces.map((src) => (
+                        <img key={src} src={src} alt="" width={22} height={22} className="h-[22px] w-[22px] rounded-full border-2 border-white object-cover" />
+                      ))}
+                    </div>
+                    <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-[#101828]">
+                      <Star size={14} className="fill-[#F5B400] text-[#F5B400]" />
+                      {course.rating}
+                      <span className="font-normal text-[#94A3B8]">({course.reviews})</span>
+                    </span>
+                  </div>
+                  <Link to="/courses" className="mt-4 inline-flex w-full items-center justify-center rounded-lg border border-[#111827] bg-white px-4 py-2 text-[14px] font-semibold text-[#101828]">
+                    View Course
+                  </Link>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="w-full bg-white px-8 py-16 text-left sm:px-14 lg:px-24">
+        <div className="grid items-center gap-12 lg:grid-cols-[minmax(320px,520px)_1fr]">
+          <div className="text-left">
+            <p className="mb-4 flex items-center gap-3 text-[14px] font-bold uppercase tracking-[2px] text-[#94A3B8]">
+              <span>03</span>
+              <span className="h-px w-16 bg-[#D5Dbe3]" />
+              <span>Why choose us</span>
+            </p>
+            <h2 className="why-title">Everything You Need for CUET Preparation</h2>
+            <p className="mt-5 max-w-[460px] text-left text-[18px] leading-relaxed text-[#64748B]">
+              A complete and focused platform to help you prepare better, practice smarter and stay ahead.
+            </p>
+          </div>
+          <div className="grid gap-x-10 gap-y-10 sm:grid-cols-2">
+            {reasons.map((item) => (
+              <div key={item.title} className="flex items-start gap-5 text-left">
+                <span className={`flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl ${item.tint}`}>
+                  <item.icon size={36} strokeWidth={2.1} />
+                </span>
+                <div className="text-left">
+                  <p className="text-left text-[20px] font-bold leading-snug text-[#101828]">{item.title}</p>
+                  <p className="mt-1 text-left text-[16px] leading-snug text-[#64748B]">{item.text}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="relative bg-[#F4F6FB] px-8 py-16 sm:px-14 lg:px-24">
+        <div className="grid items-center gap-8 xl:grid-cols-[minmax(240px,300px)_1fr]">
+          <div className="relative text-left">
+            <span aria-hidden="true" className="pointer-events-none absolute -bottom-10 left-0 select-none font-serif text-[180px] leading-none text-[#E4EAF3]">“</span>
+            <p className="mb-4 flex items-center gap-3 text-[14px] font-bold uppercase tracking-[2px] text-[#94A3B8]">
+              <span>04</span>
+              <span className="h-px w-16 bg-[#D5Dbe3]" />
+              <span>Student stories</span>
+            </p>
+            <h2 className="why-title relative">
+              Built by
+              <span className="block text-[#3267f5]">CUET rankers</span>
+            </h2>
+            <p className="relative mt-5 max-w-[300px] text-left text-[16px] leading-relaxed text-[#64748B]">
+              HeyStudent was started by Moksh Jindal and Naman Kumar after they sat CUET and kept getting the same questions from juniors.
+            </p>
+          </div>
+          <div>
+            <div className="grid gap-5 xl:grid-cols-2">
+              {founders.map((person) => (
+                <article key={person.name} className="flex min-h-[280px] gap-4 rounded-[22px] bg-white p-4 text-left shadow-[0_10px_30px_rgba(16,24,40,0.06)]">
+                  <img
+                    src={person.photo}
+                    alt={person.name}
+                    width={220}
+                    height={280}
+                    loading="lazy"
+                    className="h-auto w-[176px] shrink-0 self-stretch rounded-2xl object-cover object-top sm:w-[196px]"
+                  />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <div className={`rounded-xl px-3 py-3 ${person.badge}`}>
+                      <div className="flex items-start gap-2">
+                        <Trophy size={18} className="mt-0.5 shrink-0" color={person.trophy} fill={person.trophy} />
+                        <div>
+                          <p className="text-[18px] font-bold leading-none text-[#101828]">{person.air}</p>
+                          <p className="mt-1.5 whitespace-nowrap text-[13px] leading-snug text-[#64748B]">{person.year}</p>
+                          <p className="whitespace-nowrap text-[13px] leading-snug text-[#64748B]">{person.college}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-3 flex-1 text-[14px] leading-relaxed text-[#475569]">“{person.quote}”</p>
+                    <p className="mt-4 text-[16px] font-bold text-[#101828]">{person.name}</p>
+                    <p className="text-[13px] text-[#94A3B8]">{person.role}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="px-8 py-14 sm:px-14 lg:px-24">
+        <div className="relative overflow-hidden rounded-[28px] bg-[#EEF1FF] px-8 py-10 sm:px-12 lg:px-14 lg:py-12">
+          <svg className="pointer-events-none absolute -left-16 top-1/2 h-[420px] w-[420px] -translate-y-1/2 text-white/70" viewBox="0 0 420 420" aria-hidden="true">
+            <circle cx="210" cy="210" r="70" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <circle cx="210" cy="210" r="120" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <circle cx="210" cy="210" r="170" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <circle cx="210" cy="210" r="210" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+          <div className="relative grid items-center gap-8 lg:grid-cols-[minmax(280px,1fr)_minmax(320px,1.05fr)]">
+            <div className="text-left">
+              <p className="mb-4 flex items-center gap-3 text-[14px] font-bold uppercase tracking-[2px] text-[#94A3B8]">
+                <span>05</span>
+                <span className="h-px w-16 bg-[#C9D2E3]" />
+                <span>Get started</span>
+              </p>
+              <h2 className="why-title max-w-[520px]">Start Your CUET Preparation Today</h2>
+              <p className="mt-5 max-w-[420px] text-left text-[16px] leading-relaxed text-[#64748B]">
+                Join thousands of students and take a step closer to your dream university.
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Link to="/signup" className="inline-flex items-center gap-2 rounded-md bg-[#111827] px-5 py-3 text-[15px] font-semibold text-white">
+                  Create Free Account <ArrowRight size={16} />
+                </Link>
+                <Link to="/mock-tests" className="inline-flex items-center rounded-md border border-[#D0D5DD] bg-white px-5 py-3 text-[15px] font-semibold text-[#101828]">
+                  Explore Mock Tests
+                </Link>
+              </div>
+            </div>
+            <div className="flex items-center justify-center gap-2 sm:gap-4">
+              <img
+                src="/Last%20section%20image.png"
+                alt="Student at a laptop with a checklist: Learn, Practice, Improve, Succeed"
+                className="h-auto w-full max-w-[460px]"
+              />
+              <p className="shrink-0 text-left text-[28px] leading-[1.05] text-[#334155] sm:text-[32px]" style={{ fontFamily: 'Caveat, cursive' }}>
+                Better
+                <br />
+                Practice
+                <br />
+                Brighter
+                <br />
+                Tomorrow
+                <svg className="mt-1 h-3 w-20 text-[#3267f5]" viewBox="0 0 80 12" aria-hidden="true">
+                  <path d="M2 8c10-6 18 4 28-1s16 5 26 0 16-2 22 1" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                </svg>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };
 
-export default HomePage; 
+export default HomePage;

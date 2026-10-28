@@ -1,8 +1,12 @@
 import React, { useEffect, useRef, lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import ScrollToTop from './components/ScrollToTop';
 import { AuthProvider } from './context/AuthContext';
+import { DashboardProvider } from './context/DashboardContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import DashboardLayout from './components/dashboard/DashboardLayout';
+import DashboardGate from './components/dashboard/DashboardGate';
+import AdminLayout from './components/admin/AdminLayout';
 import WhatsAppButton from './components/WhatsAppButton';
 import LeadCaptureModal from './components/LeadCaptureModal';
 import { ToastContainer } from 'react-toastify';
@@ -20,22 +24,28 @@ import Footer from './components/Footer';
 // ── Non-critical routes — code-split into separate lazy chunks ───────────────
 const ProfilePage              = lazy(() => import('./pages/CompleteProfile'));
 const UserProfile              = lazy(() => import('./pages/UserProfile'));
-const AdminPage                = lazy(() => import('./pages/AdminPage'));
-const AdminUsersPage           = lazy(() => import('./pages/AdminUsersPage'));
-const AdminInstitutesPage      = lazy(() => import('./pages/AdminInstitutesPage'));
-const AdminAccommodationsPage  = lazy(() => import('./pages/AdminAccommodationsPage'));
-const AdminAccommodationEditPage = lazy(() => import('./pages/AdminAccommodationEditPage'));
-const AdminCoursesPage         = lazy(() => import('./pages/AdminCoursesPage'));
-const AdminVideosPage          = lazy(() => import('./pages/AdminVideosPage'));
-const VideosPage               = lazy(() => import('./pages/VideosPage'));
-const AdminPostsPage           = lazy(() => import('./pages/AdminPostsPage'));
-const AdminPaidUsersPage       = lazy(() => import('./pages/AdminPaidUsersPage'));
-const AdminPrePaymentLeadsPage = lazy(() => import('./pages/AdminPrePaymentLeadsPage'));
-const CuetPredictorPage        = lazy(() => import('./pages/CuetPredictorPage'));
-const AdminCuetPredictorPage   = lazy(() => import('./pages/AdminCuetPredictorPage'));
-const StudentDashboardPage     = lazy(() => import('./pages/StudentDashboardPage'));
+const AdminOverviewPage        = lazy(() => import('./pages/admin/AdminOverviewPage'));
+const AdminUsersPage           = lazy(() => import('./pages/admin/AdminUsersPage'));
+const AdminInstitutesPage      = lazy(() => import('./pages/admin/AdminInstitutesPage'));
+const AdminReferralsPage       = lazy(() => import('./pages/admin/AdminReferralsPage'));
+const AdminCoursesPage         = lazy(() => import('./pages/admin/AdminCoursesPage'));
+const AdminPostsPage           = lazy(() => import('./pages/admin/AdminPostsPage'));
+const AdminPaymentsPage        = lazy(() => import('./pages/admin/AdminPaymentsPage'));
+const AdminContactPage         = lazy(() => import('./pages/admin/AdminContactPage'));
+const AdminQuestionBankPage    = lazy(() => import('./pages/admin/AdminQuestionBankPage'));
+const AdminMockTestsPage       = lazy(() => import('./pages/admin/AdminMockTestsPage'));
+const AdminPlansPage            = lazy(() => import('./pages/admin/AdminPlansPage'));
+const MockTestsPage             = lazy(() => import('./pages/MockTestsPage'));
+const MockTestRoomPage          = lazy(() => import('./pages/MockTestRoomPage'));
+const MockTestResultPage       = lazy(() => import('./pages/MockTestResultPage'));
+const DashboardOverviewPage    = lazy(() => import('./pages/dashboard/DashboardOverviewPage'));
+const DashboardCoursesPage     = lazy(() => import('./pages/dashboard/DashboardCoursesPage'));
+const DashboardCourseContentPage = lazy(() => import('./pages/dashboard/DashboardCourseContentPage'));
+const DashboardMockTestsPage   = lazy(() => import('./pages/dashboard/DashboardMockTestsPage'));
+const DashboardProfilePage     = lazy(() => import('./pages/dashboard/DashboardProfilePage'));
 const PostDetailPage           = lazy(() => import('./pages/PostDetailPage'));
 const InstituteDashboardPage   = lazy(() => import('./pages/InstituteDashboardPage'));
+const ContactPage              = lazy(() => import('./pages/ContactPage'));
 
 // Minimal fallback — uses CSS animation so no extra JS, no layout shift
 const PageLoader = () => (
@@ -98,6 +108,7 @@ function AppContent() {
               <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/about" element={<AboutPage />} />
+                <Route path="/contact" element={<ContactPage />} />
                 <Route path="/courses" element={<CoursesPage />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/signup" element={<Signup />} />
@@ -105,71 +116,54 @@ function AppContent() {
                 <Route path="/user-profile" element={<UserProfile />} />
                 <Route path="/admin" element={
                   <ProtectedRoute requiredRole="admin">
-                    <AdminPage />
+                    <AdminLayout />
+                  </ProtectedRoute>
+                }>
+                  <Route index element={<AdminOverviewPage />} />
+                  <Route path="users" element={<AdminUsersPage />} />
+                  <Route path="institutes" element={<AdminInstitutesPage />} />
+                  <Route path="referrals" element={<AdminReferralsPage />} />
+                  <Route path="courses" element={<AdminCoursesPage />} />
+                  <Route path="posts" element={<AdminPostsPage />} />
+                  <Route path="payments" element={<AdminPaymentsPage />} />
+                  <Route path="contact" element={<AdminContactPage />} />
+                  <Route path="questions" element={<AdminQuestionBankPage />} />
+                  <Route path="mock-tests" element={<AdminMockTestsPage />} />
+                  <Route path="plans" element={<AdminPlansPage />} />
+                </Route>
+                {/* Legacy paths redirected to their new home under the admin shell */}
+                <Route path="/admin/paid-users" element={<Navigate to="/admin/payments" replace />} />
+                <Route path="/admin/pre-payment-leads" element={<Navigate to="/admin/payments" replace />} />
+                <Route path="/admin/cuet-predictor" element={<Navigate to="/admin" replace />} />
+                <Route path="/admin/videos" element={<Navigate to="/admin" replace />} />
+                <Route path="/videos" element={<Navigate to="/" replace />} />
+                <Route path="/college-predictor" element={<Navigate to="/" replace />} />
+                <Route path="/mock-tests" element={<MockTestsPage />} />
+                <Route path="/mock-tests/attempt/:attemptId" element={
+                  <ProtectedRoute>
+                    <MockTestRoomPage />
                   </ProtectedRoute>
                 } />
-                <Route path="/admin/users" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminUsersPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin/institutes" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminInstitutesPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin/accommodations" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminAccommodationsPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin/accommodations/new" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminAccommodationEditPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin/accommodations/edit/:id" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminAccommodationEditPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin/courses" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminCoursesPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin/videos" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminVideosPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/videos" element={<VideosPage />} />
-                <Route path="/admin/posts" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminPostsPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin/paid-users" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminPaidUsersPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/admin/pre-payment-leads" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminPrePaymentLeadsPage />
-                  </ProtectedRoute>
-                } />
-                <Route path="/college-predictor" element={<CuetPredictorPage />} />
-                <Route path="/admin/cuet-predictor" element={
-                  <ProtectedRoute requiredRole="admin">
-                    <AdminCuetPredictorPage />
+                <Route path="/mock-tests/result/:attemptId" element={
+                  <ProtectedRoute>
+                    <MockTestResultPage />
                   </ProtectedRoute>
                 } />
                 <Route path="/student/dashboard" element={
                   <ProtectedRoute>
-                    <StudentDashboardPage />
+                    <DashboardProvider>
+                      <DashboardLayout />
+                    </DashboardProvider>
                   </ProtectedRoute>
-                } />
+                }>
+                  <Route element={<DashboardGate />}>
+                    <Route index element={<DashboardOverviewPage />} />
+                    <Route path="courses" element={<DashboardCoursesPage />} />
+                    <Route path="courses/:courseId" element={<DashboardCourseContentPage />} />
+                    <Route path="mock-tests" element={<DashboardMockTestsPage />} />
+                    <Route path="profile" element={<DashboardProfilePage />} />
+                  </Route>
+                </Route>
                 <Route path="/student/post/:id" element={
                   <ProtectedRoute>
                     <PostDetailPage />

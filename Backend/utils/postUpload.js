@@ -32,6 +32,7 @@ const postStorage = new CloudinaryStorage({
     return {
       folder,
       resource_type: resourceType,
+      type: 'authenticated',
       public_id: `${Date.now()}-${file.originalname.replace(/\s+/g, '-')}`,
     };
   },

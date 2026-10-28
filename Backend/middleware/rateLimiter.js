@@ -52,3 +52,12 @@ exports.syncLimiter = rateLimit({
   legacyHeaders: false,
   message: msg('user sync'),
 });
+
+// ─── Contact form submission — 5 messages / 15 min per IP ────────────────────
+exports.contactLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: msg('contact form submission'),
+});

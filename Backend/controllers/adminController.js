@@ -3,7 +3,9 @@ const Alumni = require('../models/Alumni');
 const Accommodation = require('../models/Accommodation');
 const Referral = require('../models/Referral');
 const PrePaymentLead = require('../models/PrePaymentLead');
+const ReferralRewardSetting = require('../models/ReferralRewardSetting');
 const ErrorResponse = require('../utils/errorResponse');
+const { parseRewardPercent } = require('../utils/referralReward');
 const { sanitizeStr, isValidEmail, isNonEmpty } = require('../middleware/validate');
 
 // @desc    Admin login
@@ -500,14 +502,17 @@ exports.getEmailUsers = async (req, res, next) => {
 // @access  Private/Admin
 exports.promoteEmailUserToAdmin = async (req, res, next) => {
   try {
-    const user = await EmailUser.findById(req.params.id);
+    // findByIdAndUpdate + runValidators:false avoids 500s on legacy records
+    // that predate a since-added required field (mirrors promoteToInstitute).
+    const user = await EmailUser.findByIdAndUpdate(
+      req.params.id,
+      { $set: { role: 'admin' } },
+      { new: true, runValidators: false, context: 'query' }
+    );
 
     if (!user) {
       return next(new ErrorResponse(`User not found with id ${req.params.id}`, 404));
     }
-
-    user.role = 'admin';
-    await user.save();
 
     res.status(200).json({
       success: true,
@@ -516,6 +521,49 @@ exports.promoteEmailUserToAdmin = async (req, res, next) => {
         name: user.name,
         email: user.email,
         role: user.role
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Set a user's role directly (used to demote admin/institute back to student,
+//          or move between any roles without the institute-specific referral-code logic)
+// @route   PUT /api/admin/email-users/:id/role
+// @access  Private/Admin
+exports.setUserRole = async (req, res, next) => {
+  try {
+    const validRoles = ['student', 'admin', 'institute'];
+    const { role } = req.body || {};
+    if (!validRoles.includes(role)) {
+      return next(new ErrorResponse(`Role must be one of: ${validRoles.join(', ')}`, 400));
+    }
+
+    const target = await EmailUser.findById(req.params.id).select('_id role');
+    if (!target) {
+      return next(new ErrorResponse(`User not found with id ${req.params.id}`, 404));
+    }
+
+    // Prevent an admin from accidentally demoting themselves out of admin access.
+    if (String(target._id) === String(req.user._id) && target.role === 'admin' && role !== 'admin') {
+      return next(new ErrorResponse('You cannot change your own admin role', 400));
+    }
+
+    const updated = await EmailUser.findByIdAndUpdate(
+      req.params.id,
+      { $set: { role } },
+      { new: true, runValidators: false, context: 'query' }
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: updated._id,
+        name: updated.name,
+        email: updated.email,
+        role: updated.role,
+        referralCode: updated.referralCode,
       }
     });
   } catch (err) {
@@ -539,6 +587,38 @@ exports.deleteEmailUser = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: {}
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getStudentReferralReward = async (req, res, next) => {
+  try {
+    const setting = await ReferralRewardSetting.findOne({ key: 'student' }).lean();
+    res.status(200).json({
+      success: true,
+      data: { discountPercent: Number(setting?.discountPercent) || 0 },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.updateStudentReferralReward = async (req, res, next) => {
+  try {
+    const discountPercent = parseRewardPercent(req.body?.discountPercent);
+    if (discountPercent === null) {
+      return next(new ErrorResponse('Enter a discount from 0% to 100%.', 400));
+    }
+    const setting = await ReferralRewardSetting.findOneAndUpdate(
+      { key: 'student' },
+      { $set: { discountPercent } },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+    res.status(200).json({
+      success: true,
+      data: { discountPercent: setting.discountPercent },
     });
   } catch (err) {
     next(err);

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { useAuth } from '../context/AuthContext';
 import SharedNavbar from '../components/SharedNavbar';
 import { authApi, enrollmentsApi } from '../services/api';
@@ -129,6 +130,9 @@ const UserProfile: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#fff9ed] font-['Inter',sans-serif]">
+      <Helmet>
+        <meta name="robots" content="noindex, nofollow" />
+      </Helmet>
       <SharedNavbar />
       <div className="flex flex-col items-center justify-center py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-lg w-full space-y-8 bg-white/40 backdrop-blur-sm p-8 rounded-2xl shadow-sm border border-neutral-100">

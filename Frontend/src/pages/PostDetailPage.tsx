@@ -1,19 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import SharedNavbar from '../components/SharedNavbar';
+import { postsApi } from '../services/api';
 
 /* ─── FULL REDESIGN ─────────────────────────────────────────────────────────
    Open layout — no wrapping box. Order: header → images (carousel) →
-   documents → videos.
+   documents.
 ────────────────────────────────────────────────────────────────────────── */
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 interface Attachment {
+  _id?: string;
   label: string;
-  url: string;
+  url?: string;
   type?: 'image' | 'document' | 'video';
-  cloudflareVideoId?: string;
 }
+
+const isPublicLink = (url?: string) => !!url && !url.includes('cloudinary.com');
 
 interface Folder {
   name: string;
@@ -104,8 +108,15 @@ const PostDetailPage: React.FC = () => {
   }
 
   const images    = post.attachments?.filter((a) => a.type === 'image') ?? [];
-  const videos    = post.attachments?.filter((a) => a.type === 'video' || a.cloudflareVideoId) ?? [];
   const documents = post.attachments?.filter((a) => a.type === 'document') ?? [];
+  const mediaSrc = (att: Attachment) => (isPublicLink(att.url) ? att.url || '' : '');
+  const openFile = (att: Attachment) => {
+    if (isPublicLink(att.url) && att.url) {
+      window.open(att.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (att._id) postsApi.openAttachment(post._id, att._id).catch(() => {});
+  };
 
   const dateStr = new Date(post.createdAt).toLocaleDateString('en-IN', {
     day: 'numeric', month: 'long', year: 'numeric',
@@ -120,6 +131,9 @@ const PostDetailPage: React.FC = () => {
   /* ── Render ─────────────────────────────────────────────────────────── */
   return (
     <div className="min-h-screen" style={{ background: '#FAF7F0' }}>
+      <Helmet>
+        <meta name="robots" content="noindex, nofollow" />
+      </Helmet>
       <SharedNavbar />
 
       <div ref={pageRef} className="pt-24 pb-24 px-4">
@@ -200,7 +214,6 @@ const PostDetailPage: React.FC = () => {
                     {folders.map((folder, fi) => {
                       const isOpen = activeFolder === fi;
                       const fImages = folder.attachments.filter((a) => a.type === 'image');
-                      const fVideos = folder.attachments.filter((a) => a.type === 'video' || a.cloudflareVideoId);
                       const fDocs   = folder.attachments.filter((a) => a.type === 'document');
                       return (
                         <div
@@ -240,8 +253,8 @@ const PostDetailPage: React.FC = () => {
                                   <SectionHeading icon="🖼️">Images</SectionHeading>
                                   <div className="grid grid-cols-2 gap-3">
                                     {fImages.map((img, i) => (
-                                      <div key={i} className="overflow-hidden rounded-xl cursor-zoom-in" onClick={() => setLightbox(img.url)}>
-                                        <img src={img.url} alt={img.label || 'Image'} className="w-full h-36 object-cover hover:scale-[1.03] transition-transform duration-200" />
+                                      <div key={i} className="overflow-hidden rounded-xl cursor-zoom-in" onClick={() => (mediaSrc(img) ? setLightbox(mediaSrc(img)) : openFile(img))}>
+                                        <img src={mediaSrc(img)} alt={img.label || 'Image'} className="w-full h-36 object-cover hover:scale-[1.03] transition-transform duration-200" />
                                       </div>
                                     ))}
                                   </div>
@@ -261,8 +274,8 @@ const PostDetailPage: React.FC = () => {
                                         ext === 'XLSX' || ext === 'XLS'  ? '#2E7D32' :
                                         ext === 'PPTX' || ext === 'PPT'  ? '#D84315' : '#37474F';
                                       return (
-                                        <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
-                                          className="flex items-center gap-3 group"
+                                        <button type="button" key={i} onClick={() => openFile(att)}
+                                          className="flex w-full cursor-pointer items-center gap-3 text-left group"
                                           style={{ background: '#fff', border: '1px solid #EDE8DE', borderRadius: 12, padding: '12px 16px', textDecoration: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
                                           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#d4cabc'; }}
                                           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#EDE8DE'; }}
@@ -278,37 +291,7 @@ const PostDetailPage: React.FC = () => {
                                           <svg className="w-4 h-4 text-gray-300 group-hover:text-amber-500 transition-colors" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" d="M7 17L17 7M17 7H7M17 7v10" />
                                           </svg>
-                                        </a>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Folder videos */}
-                              {fVideos.length > 0 && (
-                                <div>
-                                  <SectionHeading icon="🎬">Videos</SectionHeading>
-                                  <div className="space-y-4">
-                                    {fVideos.map((att, i) => {
-                                      const videoId = att.cloudflareVideoId || att.url?.split('/').pop();
-                                      return (
-                                        <div key={i}>
-                                          {att.label && att.label !== videoId && (
-                                            <p className="text-sm font-semibold text-[#1a1a1a] mb-2" style={{ fontFamily: "'DM Sans','Inter',sans-serif" }}>{att.label}</p>
-                                          )}
-                                          <div className="overflow-hidden rounded-xl" style={{ background: '#111' }}>
-                                            <div className="relative" style={{ paddingBottom: '56.25%' }}>
-                                              <iframe
-                                                src={`https://iframe.cloudflarestream.com/${videoId}`}
-                                                title={att.label || `Video ${i + 1}`}
-                                                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
-                                                allowFullScreen
-                                                className="absolute inset-0 w-full h-full border-0"
-                                              />
-                                            </div>
-                                          </div>
-                                        </div>
+                                        </button>
                                       );
                                     })}
                                   </div>
@@ -340,10 +323,10 @@ const PostDetailPage: React.FC = () => {
                   /* Single image */
                   <div
                     className="relative cursor-zoom-in group overflow-hidden rounded-2xl bg-gray-100"
-                    onClick={() => setLightbox(images[0].url)}
+                    onClick={() => (mediaSrc(images[0]) ? setLightbox(mediaSrc(images[0])) : openFile(images[0]))}
                   >
                     <img
-                      src={images[0].url}
+                      src={mediaSrc(images[0])}
                       alt={images[0].label || 'Image'}
                       className="w-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
                       style={{ maxHeight: 480 }}
@@ -361,11 +344,11 @@ const PostDetailPage: React.FC = () => {
                     <div className="relative overflow-hidden rounded-2xl bg-gray-100">
                       {/* Main image */}
                       <img
-                        src={images[imgIdx].url}
+                        src={mediaSrc(images[imgIdx])}
                         alt={images[imgIdx].label || `Image ${imgIdx + 1}`}
                         className="w-full object-cover cursor-zoom-in"
                         style={{ maxHeight: 480 }}
-                        onClick={() => setLightbox(images[imgIdx].url)}
+                        onClick={() => (mediaSrc(images[imgIdx]) ? setLightbox(mediaSrc(images[imgIdx])) : openFile(images[imgIdx]))}
                       />
 
                       {/* Prev arrow */}
@@ -418,7 +401,7 @@ const PostDetailPage: React.FC = () => {
                             opacity: i === imgIdx ? 1 : 0.5,
                           }}
                         >
-                          <img src={img.url} alt="" className="w-full h-full object-cover" />
+                          <img src={mediaSrc(img)} alt="" className="w-full h-full object-cover" />
                         </button>
                       ))}
                     </div>
@@ -456,12 +439,11 @@ const PostDetailPage: React.FC = () => {
                       ext === 'XLSX' ? 'Spreadsheet' :
                       ext === 'PPTX' ? 'Presentation' : ext;
                     return (
-                      <a
+                      <button
+                        type="button"
                         key={i}
-                        href={att.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-4 group"
+                        onClick={() => openFile(att)}
+                        className="flex w-full cursor-pointer items-center gap-4 text-left group"
                         style={{
                           background: '#fff',
                           border: '1px solid #EDE8DE',
@@ -503,46 +485,7 @@ const PostDetailPage: React.FC = () => {
                           fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M7 17L17 7M17 7H7M17 7v10" />
                         </svg>
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* ══ VIDEOS ══════════════════════════════════════════════════ */}
-          {videos.length > 0 && (
-            <>
-              <hr style={{ border: 'none', borderTop: '1px solid #EDE8DE' }} />
-              <div className="py-8">
-                <SectionHeading icon="🎬">Videos</SectionHeading>
-                <div className="space-y-6">
-                  {videos.map((att, i) => {
-                    const videoId = att.cloudflareVideoId || att.url?.split('/').pop();
-                    return (
-                      <div key={i}>
-                        {att.label && att.label !== videoId && (
-                          <p className="text-sm font-semibold text-[#1a1a1a] mb-2"
-                            style={{ fontFamily: "'DM Sans','Inter',sans-serif" }}>
-                            {att.label}
-                          </p>
-                        )}
-                        <div
-                          className="overflow-hidden rounded-2xl"
-                          style={{ background: '#111', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}
-                        >
-                          <div className="relative" style={{ paddingBottom: '56.25%' }}>
-                            <iframe
-                              src={`https://iframe.cloudflarestream.com/${videoId}`}
-                              title={att.label || `Video ${i + 1}`}
-                              allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
-                              allowFullScreen
-                              className="absolute inset-0 w-full h-full border-0"
-                            />
-                          </div>
-                        </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>

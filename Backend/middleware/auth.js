@@ -140,6 +140,29 @@ exports.protect = async (req, res, next) => {
   });
 };
 
+// Same session lookup as protect, but anonymous visitors continue with req.user = null.
+exports.optionalProtect = async (req, res, next) => {
+  let denied = false;
+  let continued = false;
+  const proxy = {
+    status() { return this; },
+    json() { denied = true; },
+  };
+  try {
+    await exports.protect(req, proxy, (err) => {
+      continued = true;
+      next(err);
+    });
+  } catch (err) {
+    if (!continued) next(err);
+    return;
+  }
+  if (!continued) {
+    if (denied) req.user = null;
+    next();
+  }
+};
+
 // Grant access to specific roles
 exports.authorize = (...roles) => {
   return (req, res, next) => {

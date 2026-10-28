@@ -2,6 +2,7 @@ const express = require('express');
 const {
   createOrder,
   verifyPayment,
+  cancelCheckout,
   handleWebhook,
   getMyPayments,
   getPaymentById,
@@ -11,6 +12,8 @@ const {
   getRazorpayDetails,
   savePrePaymentLead,
   getAllLeads,
+  setLeadConverted,
+  deleteLead,
 } = require('../controllers/paymentController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -41,11 +44,14 @@ router.post(
 router.get('/admin/all', protect, authorize('admin'), getAllPayments);
 router.get('/admin/stats', protect, authorize('admin'), getPaymentStats);
 router.get('/leads', protect, authorize('admin'), getAllLeads);
+router.put('/leads/:id/converted', protect, authorize('admin'), setLeadConverted);
+router.delete('/leads/:id', protect, authorize('admin'), deleteLead);
 
 // ─── Authenticated user routes ────────────────────────────────────────────────
 router.get('/my', protect, getMyPayments);
 router.post('/create-order', protect, paymentLimiter, createOrder);
 router.post('/verify', protect, verifyPayment);
+router.post('/cancel', protect, cancelCheckout);
 // Pre-payment lead — public (no auth guard, but optionally attach user if logged in)
 router.post('/save-lead', savePrePaymentLead);
 

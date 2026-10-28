@@ -77,6 +77,10 @@ const CourseSchema = new mongoose.Schema({
     },
     fileExtension: String,
     cloudinaryPublicId: String,
+    cloudinaryDelivery: {
+      type: String,
+      enum: ['upload', 'private', 'authenticated'],
+    },
     // For video links (YouTube, Vimeo, etc.)
     videoUrl: String,
     videoPlatform: {

@@ -2,6 +2,8 @@ const express = require('express');
 const {
   getCourses,
   getCourseById,
+  getMyMaterials,
+  getAdminMaterials,
   createCourse,
   updateCourse,
   deleteCourse,
@@ -23,7 +25,11 @@ router.get('/', getCourses);
 router.get('/category/:category', getCoursesByCategory);
 router.get('/:id', getCourseById);
 
+// Enrolled students — full material detail (route must stay above any admin :id routes)
+router.get('/:id/my-materials', protect, getMyMaterials);
+
 // Admin only routes
+router.get('/:id/admin-materials', protect, authorize('admin'), getAdminMaterials);
 router.post('/', protect, authorize('admin'), createCourse);
 router.put('/:id', protect, authorize('admin'), updateCourse);
 router.delete('/:id', protect, authorize('admin'), deleteCourse);

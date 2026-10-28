@@ -13,11 +13,21 @@ const PostSchema = new mongoose.Schema(
       required: [true, 'Post content is required'],
       trim: true,
     },
-    // Which course slug this post belongs to (blank = visible to all enrolled students)
+    // The course this post belongs to. This is the source of truth going
+    // forward — matched against Enrollment.courseId, not courseSlug (which
+    // historically held inconsistent values: sometimes a real slug,
+    // sometimes a course's _id as a string).
+    courseId: {
+      type: mongoose.Schema.ObjectId,
+      ref: 'Course',
+      default: null,
+    },
+    // Legacy field, kept for backward compatibility with posts created
+    // before courseId existed. New posts should always set courseId.
     courseSlug: {
       type: String,
       trim: true,
-      default: 'du-campus-advantage', // default to the premium course
+      default: '',
     },
     // Optional attachment / resource links (unfiled — backward-compatible)
     attachments: [
@@ -29,7 +39,9 @@ const PostSchema = new mongoose.Schema(
           enum: ['image', 'document', 'video'],
           default: 'document',
         },
-        cloudflareVideoId: { type: String, trim: true, default: '' },
+        publicId: { type: String, trim: true, default: '' },
+        resourceType: { type: String, trim: true, default: '' },
+        deliveryType: { type: String, trim: true, default: '' },
       },
     ],
     // Folder-based content organisation
@@ -45,7 +57,9 @@ const PostSchema = new mongoose.Schema(
               enum: ['image', 'document', 'video'],
               default: 'document',
             },
-            cloudflareVideoId: { type: String, trim: true, default: '' },
+            publicId: { type: String, trim: true, default: '' },
+            resourceType: { type: String, trim: true, default: '' },
+            deliveryType: { type: String, trim: true, default: '' },
           },
         ],
       },
@@ -79,6 +93,7 @@ const PostSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+PostSchema.index({ courseId: 1, createdAt: -1 });
 PostSchema.index({ courseSlug: 1, createdAt: -1 });
 PostSchema.index({ isPinned: -1, createdAt: -1 });
 

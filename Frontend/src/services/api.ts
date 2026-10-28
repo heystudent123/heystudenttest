@@ -37,6 +37,22 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+export async function fetchProtectedObjectUrl(path: string) {
+  const response = await api.get(path, { responseType: 'blob' });
+  const headerType = String(response.headers['content-type'] || '');
+  if (headerType.includes('application/json')) {
+    throw new Error('Could not open this file.');
+  }
+  const blob = new Blob([response.data], { type: headerType || 'application/octet-stream' });
+  return URL.createObjectURL(blob);
+}
+
+export async function openProtectedFile(path: string) {
+  const objectUrl = await fetchProtectedObjectUrl(path);
+  window.open(objectUrl, '_blank', 'noopener,noreferrer');
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+}
+
 // =================== ACCOMMODATIONS API ===================
 export const accommodationsApi = {
   getAll: async (filters = {}) => {
@@ -124,6 +140,28 @@ export const coursesApi = {
       return response.data;
     } catch (error) {
       console.error(`Error fetching courses for category ${category}:`, error);
+      throw error;
+    }
+  },
+
+  getMyMaterials: async (courseId: string) => {
+    try {
+      const response = await api.get(`/courses/${courseId}/my-materials`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching materials for course ${courseId}:`, error);
+      throw error;
+    }
+  },
+
+  openMaterial: (materialId: string) => openProtectedFile(`/materials/${materialId}`),
+
+  getAdminMaterials: async (courseId: string) => {
+    try {
+      const response = await api.get(`/courses/${courseId}/admin-materials`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching admin materials for course ${courseId}:`, error);
       throw error;
     }
   },
@@ -216,13 +254,24 @@ export interface AuthApi {
   }) => Promise<any>;
   getRegisteredUsers: () => Promise<any>;
   promoteToAdmin: (userId: string) => Promise<any>;
+  setUserRole: (userId: string, role: 'student' | 'admin' | 'institute') => Promise<any>;
   deleteUser: (userId: string) => Promise<any>;
   getReferrals: (params?: PaginationParams) => Promise<any>;
   getReferredUsers: (params?: PaginationParams) => Promise<any>;
+  getMyReferralCode: () => Promise<any>;
   getUsers: (role?: string) => Promise<any>;
   promoteToInstitute: (userId: string, customReferralCode?: string) => Promise<any>;
   getInstitutes: () => Promise<any>;
   getUsersByReferralCode: (referralCode: string) => Promise<any>;
+  getStudentReferralReward: () => Promise<any>;
+  updateStudentReferralReward: (discountPercent: number) => Promise<any>;
+  getReferralCenter: () => Promise<any>;
+  getReferralUses: (userId: string) => Promise<any>;
+  updateReferralSettings: (data: { studentPercent: number; institutePercent: number }) => Promise<any>;
+  updateInstituteReferralCode: (id: string, referralCode: string) => Promise<any>;
+  listCoupons: () => Promise<any>;
+  saveCoupon: (data: Record<string, unknown>, id?: string) => Promise<any>;
+  deleteCoupon: (id: string) => Promise<any>;
   validateReferralCode: (referralCode: string) => Promise<any>;
   getServerHealth: () => Promise<any>;
   getApiStats: () => Promise<any>;
@@ -348,6 +397,16 @@ export const authApi: AuthApi = {
     }
   },
 
+  setUserRole: async (userId: string, role: 'student' | 'admin' | 'institute') => {
+    try {
+      const response = await api.put(`/admin/email-users/${userId}/role`, { role });
+      return response.data;
+    } catch (error) {
+      console.error('Error setting user role:', error);
+      throw error;
+    }
+  },
+
   deleteUser: async (userId: string) => {
     try {
       const response = await api.delete(`/admin/email-users/${userId}`);
@@ -374,6 +433,16 @@ export const authApi: AuthApi = {
       return response.data;
     } catch (error) {
       console.error('Get referred users error:', error);
+      throw error;
+    }
+  },
+
+  getMyReferralCode: async () => {
+    try {
+      const response = await api.get('/referrals/my-code');
+      return response.data;
+    } catch (error) {
+      console.error('Get my referral code error:', error);
       throw error;
     }
   },
@@ -449,113 +518,57 @@ export const authApi: AuthApi = {
     }
   },
 
+  getStudentReferralReward: async () => {
+    const response = await api.get('/admin/student-referral-reward');
+    return response.data;
+  },
+
+  updateStudentReferralReward: async (discountPercent: number) => {
+    const response = await api.put('/admin/student-referral-reward', { discountPercent });
+    return response.data;
+  },
+
+  getReferralCenter: async () => {
+    const response = await api.get('/admin/referral-center');
+    return response.data;
+  },
+
+  getReferralUses: async (userId: string) => {
+    const response = await api.get(`/admin/referral-center/uses/${userId}`);
+    return response.data;
+  },
+
+  updateReferralSettings: async (data: { studentPercent: number; institutePercent: number }) => {
+    const response = await api.put('/admin/referral-center/settings', data);
+    return response.data;
+  },
+
+  updateInstituteReferralCode: async (id: string, referralCode: string) => {
+    const response = await api.put(`/admin/referral-center/institutes/${id}/code`, { referralCode });
+    return response.data;
+  },
+
+  listCoupons: async () => {
+    const response = await api.get('/admin/coupons');
+    return response.data;
+  },
+
+  saveCoupon: async (data: Record<string, unknown>, id?: string) => {
+    const response = id ? await api.put(`/admin/coupons/${id}`, data) : await api.post('/admin/coupons', data);
+    return response.data;
+  },
+
+  deleteCoupon: async (id: string) => {
+    const response = await api.delete(`/admin/coupons/${id}`);
+    return response.data;
+  },
+
   getPaidUsers: async () => {
     try {
       const response = await api.get('/admin/paid-users');
       return response.data;
     } catch (error) {
       console.error('Error fetching paid users:', error);
-      throw error;
-    }
-  },
-};
-
-// =================== VIDEOS API ===================
-export const videosApi = {
-  // Public
-  getVideos: async (params: Record<string, string> = {}) => {
-    try {
-      const response = await api.get('/videos', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching videos:', error);
-      throw error;
-    }
-  },
-
-  getVideo: async (id: string) => {
-    try {
-      const response = await api.get(`/videos/${id}`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching video ${id}:`, error);
-      throw error;
-    }
-  },
-
-  // Admin
-  getAdminVideos: async () => {
-    try {
-      const response = await api.get('/videos/admin/all');
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching admin videos:', error);
-      throw error;
-    }
-  },
-
-  getUploadUrl: async (maxDurationSeconds = 3600, name?: string) => {
-    try {
-      const response = await api.post('/videos/upload-url', { maxDurationSeconds, name });
-      return response.data;
-    } catch (error) {
-      console.error('Error getting upload URL:', error);
-      throw error;
-    }
-  },
-
-  createVideo: async (data: {
-    title: string;
-    description: string;
-    category: string;
-    tags: string;
-    cloudflareVideoId: string;
-  }) => {
-    try {
-      const response = await api.post('/videos', data);
-      return response.data;
-    } catch (error) {
-      console.error('Error creating video:', error);
-      throw error;
-    }
-  },
-
-  updateVideo: async (id: string, data: Record<string, any>) => {
-    try {
-      const response = await api.put(`/videos/${id}`, data);
-      return response.data;
-    } catch (error) {
-      console.error(`Error updating video ${id}:`, error);
-      throw error;
-    }
-  },
-
-  deleteVideo: async (id: string) => {
-    try {
-      const response = await api.delete(`/videos/${id}`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error deleting video ${id}:`, error);
-      throw error;
-    }
-  },
-
-  checkVideoStatus: async (id: string) => {
-    try {
-      const response = await api.get(`/videos/${id}/status`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error checking video status ${id}:`, error);
-      throw error;
-    }
-  },
-
-  checkVideoStatusByUid: async (uid: string) => {
-    try {
-      const response = await api.get(`/videos/status/${uid}`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error checking video status by uid ${uid}:`, error);
       throw error;
     }
   },
@@ -570,6 +583,7 @@ export const paymentsApi = {
     purposeId?: string;
     purposeModel?: string;
     referralCode?: string;
+    couponCode?: string;
     notes?: Record<string, string>;
   }) => {
     try {
@@ -579,6 +593,11 @@ export const paymentsApi = {
       console.error('Error creating payment order:', error);
       throw error;
     }
+  },
+
+  cancelCheckout: async (razorpayOrderId: string) => {
+    const response = await api.post('/payments/cancel', { razorpayOrderId });
+    return response.data;
   },
 
   verifyPayment: async (data: {
@@ -595,9 +614,9 @@ export const paymentsApi = {
     }
   },
 
-  getMyPayments: async () => {
+  getMyPayments: async (params: { status?: string; purpose?: string; page?: number; limit?: number } = {}) => {
     try {
-      const response = await api.get('/payments/my');
+      const response = await api.get('/payments/my', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching my payments:', error);
@@ -635,6 +654,26 @@ export const paymentsApi = {
       throw error;
     }
   },
+
+  setLeadConverted: async (leadId: string, converted: boolean) => {
+    try {
+      const response = await api.put(`/payments/leads/${leadId}/converted`, { converted });
+      return response.data;
+    } catch (error) {
+      console.error('Error updating lead status:', error);
+      throw error;
+    }
+  },
+
+  deleteLead: async (leadId: string) => {
+    try {
+      const response = await api.delete(`/payments/leads/${leadId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error deleting lead:', error);
+      throw error;
+    }
+  },
 };
 
 // =================== ENROLLMENTS API ===================
@@ -658,42 +697,13 @@ export const enrollmentsApi = {
       throw error;
     }
   },
-  savePrePaymentLead: async (data: {
-    name: string;
-    phone: string;
-    email?: string;
-    city?: string;
-    college?: string;
-    courseId?: string;
-    courseTitle?: string;
-    referralCode?: string;
-    source?: 'popup' | 'enrollment_form';
-  }) => {
-    try {
-      const response = await api.post('/payments/save-lead', data);
-      return response.data;
-    } catch (error) {
-      // Non-critical — swallow silently
-      console.warn('Could not save pre-payment lead:', error);
-      return {};
-    }
-  },
-
-  getAllLeads: async (params?: { page?: number; limit?: number }) => {
-    try {
-      const response = await api.get('/payments/leads', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching leads:', error);
-      throw error;
-    }
-  },};
+};
 
 // =================== POSTS API ===================
 export const postsApi = {
-  getPostsForCourse: async (courseSlug: string) => {
+  getPostsForCourse: async (courseId: string) => {
     try {
-      const response = await api.get(`/posts/${courseSlug}`);
+      const response = await api.get(`/posts/course/${courseId}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching posts:', error);
@@ -702,9 +712,9 @@ export const postsApi = {
   },
 
   // Admin
-  getAdminPosts: async (courseSlug?: string) => {
+  getAdminPosts: async (courseId?: string) => {
     try {
-      const params = courseSlug ? { courseSlug } : {};
+      const params = courseId ? { courseId } : {};
       const response = await api.get('/posts/admin/all', { params });
       return response.data;
     } catch (error) {
@@ -716,12 +726,13 @@ export const postsApi = {
   createPost: async (data: {
     title: string;
     content: string;
-    courseSlug?: string;
+    courseId: string;
     tag?: string;
     isPinned?: boolean;
     isPublished?: boolean;
     coverImage?: string;
-    attachments?: { label: string; url: string }[];
+    attachments?: { label: string; url?: string; type?: string; publicId?: string; resourceType?: string }[];
+    folders?: { name: string; attachments: { label: string; url?: string; type?: string; publicId?: string; resourceType?: string }[] }[];
   }) => {
     try {
       const response = await api.post('/posts', data);
@@ -765,6 +776,9 @@ export const postsApi = {
       throw error;
     }
   },
+
+  openAttachment: (postId: string, attachmentId: string) =>
+    openProtectedFile(`/posts/${postId}/attachments/${attachmentId}`),
 };
 
 // =================== CUET PREDICTOR API ===================
@@ -787,6 +801,203 @@ export const cuetPredictorApi = {
 
   getAllSubmissions: async (page = 1, limit = 100) => {
     const response = await api.get(`/cuet-predictor/admin/all?page=${page}&limit=${limit}`);
+    return response.data;
+  },
+};
+
+// =================== QUESTION BANK API ===================
+export const questionBanksApi = {
+  list: async () => {
+    const response = await api.get('/questions/banks');
+    return response.data;
+  },
+  create: async (data: { title: string; description?: string }) => {
+    const response = await api.post('/questions/banks', data);
+    return response.data;
+  },
+  update: async (id: string, data: { title: string; description?: string }) => {
+    const response = await api.put(`/questions/banks/${id}`, data);
+    return response.data;
+  },
+  remove: async (id: string) => {
+    const response = await api.delete(`/questions/banks/${id}`);
+    return response.data;
+  },
+};
+
+export const questionsApi = {
+  downloadTemplate: async () => {
+    const response = await api.get('/questions/template', { responseType: 'blob' });
+    return response.data as Blob;
+  },
+  previewImport: async (file: File, bankId: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('bankId', bankId);
+    const response = await api.post('/questions/import/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+  approveImport: async (importId: string) => {
+    const response = await api.post(`/questions/import/${importId}/approve`);
+    return response.data;
+  },
+  downloadErrorReport: async (importId: string) => {
+    const response = await api.get(`/questions/import/${importId}/errors`, { responseType: 'blob' });
+    return response.data as Blob;
+  },
+  list: async (params: { bankId?: string; q?: string; page?: number; limit?: number }) => {
+    const response = await api.get('/questions', { params });
+    return response.data;
+  },
+  chapters: async () => {
+    const response = await api.get('/questions/meta/chapters');
+    return response.data;
+  },
+  create: async (data: Record<string, unknown>) => {
+    const response = await api.post('/questions', data);
+    return response.data;
+  },
+  update: async (id: string, data: Record<string, unknown>) => {
+    const response = await api.put(`/questions/${id}`, data);
+    return response.data;
+  },
+  remove: async (id: string) => {
+    const response = await api.delete(`/questions/${id}`);
+    return response.data;
+  },
+  bulkRemove: async (ids: string[]) => {
+    const response = await api.delete('/questions/bulk', { data: { ids } });
+    return response.data;
+  },
+};
+
+// =================== MOCK TESTS API ===================
+export const mockTestsApi = {
+  list: async (params: { page?: number; status?: string; limit?: number } = {}) => {
+    const response = await api.get('/mock-tests', { params });
+    return response.data;
+  },
+  get: async (id: string) => {
+    const response = await api.get(`/mock-tests/${id}`);
+    return response.data;
+  },
+  create: async (data: Record<string, unknown>) => {
+    const response = await api.post('/mock-tests', data);
+    return response.data;
+  },
+  update: async (id: string, data: Record<string, unknown>) => {
+    const response = await api.put(`/mock-tests/${id}`, data);
+    return response.data;
+  },
+  publish: async (id: string) => {
+    const response = await api.post(`/mock-tests/${id}/publish`);
+    return response.data;
+  },
+  unpublish: async (id: string) => {
+    const response = await api.post(`/mock-tests/${id}/unpublish`);
+    return response.data;
+  },
+  remove: async (id: string) => {
+    const response = await api.delete(`/mock-tests/${id}`);
+    return response.data;
+  },
+};
+
+export const plansApi = {
+  list: async () => {
+    const response = await api.get('/plans');
+    return response.data;
+  },
+  listPublic: async () => {
+    const response = await api.get('/plans/public');
+    return response.data;
+  },
+  create: async (data: { title: string; description: string; price: number; mockTestIds: string[]; courseIds: string[] }) => {
+    const response = await api.post('/plans', data);
+    return response.data;
+  },
+  update: async (id: string, data: { title: string; description: string; price: number; mockTestIds: string[]; courseIds: string[] }) => {
+    const response = await api.put(`/plans/${id}`, data);
+    return response.data;
+  },
+  publish: async (id: string) => {
+    const response = await api.post(`/plans/${id}/publish`);
+    return response.data;
+  },
+  unpublish: async (id: string) => {
+    const response = await api.post(`/plans/${id}/unpublish`);
+    return response.data;
+  },
+  remove: async (id: string) => {
+    const response = await api.delete(`/plans/${id}`);
+    return response.data;
+  },
+};
+
+export const attemptsApi = {
+  subjects: async () => {
+    const response = await api.get('/attempts/subjects');
+    return response.data;
+  },
+  catalog: async (params: { subject?: string; q?: string; page?: number; limit?: number } = {}) => {
+    const response = await api.get('/attempts/catalog', { params });
+    return response.data;
+  },
+  listTests: async () => {
+    const response = await api.get('/attempts/tests');
+    return response.data;
+  },
+  instructions: async (id: string) => {
+    const response = await api.get(`/attempts/tests/${id}`);
+    return response.data;
+  },
+  start: async (mockTestId: string) => {
+    const response = await api.post('/attempts/start', { mockTestId });
+    return response.data;
+  },
+  startPreview: async (mockTestId: string) => {
+    const response = await api.post('/attempts/preview', { mockTestId });
+    return response.data;
+  },
+  myAttempts: async (params: { page?: number; limit?: number; mockTestId?: string } = {}) => {
+    const response = await api.get('/attempts/my', { params });
+    return response.data;
+  },
+  get: async (id: string) => {
+    const response = await api.get(`/attempts/${id}`);
+    return response.data;
+  },
+  save: async (id: string, body: { order: number; selected: string | null; markedForReview: boolean }) => {
+    const response = await api.put(`/attempts/${id}/response`, body);
+    return response.data;
+  },
+  pause: async (id: string) => {
+    const response = await api.post(`/attempts/${id}/pause`);
+    return response.data;
+  },
+  submit: async (id: string, reason: 'manual' | 'left_screen' | 'timeout') => {
+    const response = await api.post(`/attempts/${id}/submit`, { reason });
+    return response.data;
+  },
+};
+
+export const contactApi = {
+  send: async (data: { name: string; email: string; phone?: string; message: string }) => {
+    const response = await api.post('/contact', data);
+    return response.data;
+  },
+  list: async (params: { page?: number; limit?: number; status?: string } = {}) => {
+    const response = await api.get('/contact', { params });
+    return response.data;
+  },
+  setStatus: async (id: string, status: 'new' | 'read' | 'resolved') => {
+    const response = await api.put(`/contact/${id}/status`, { status });
+    return response.data;
+  },
+  remove: async (id: string) => {
+    const response = await api.delete(`/contact/${id}`);
     return response.data;
   },
 };

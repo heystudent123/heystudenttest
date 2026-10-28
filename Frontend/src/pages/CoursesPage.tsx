@@ -1,9 +1,33 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth as useClerkAuth } from '@clerk/clerk-react';
+import { Helmet } from 'react-helmet-async';
+import {
+  ArrowRight, BadgeCheck, CalendarDays, CheckCircle2, ChevronDown, GraduationCap,
+  Layers, PlayCircle, ShieldCheck, Sparkles, Star, TrendingUp, X,
+} from 'lucide-react';
 import SharedNavbar from '../components/SharedNavbar';
-import { coursesApi, paymentsApi, enrollmentsApi, authApi } from '../services/api';
+import PaymentStage, { emptyReceipt, PaymentPhase, PaymentReceipt } from '../components/PaymentStage';
+import { coursesApi, paymentsApi, enrollmentsApi, plansApi } from '../services/api';
+import { CheckoutClosed, loadRazorpayScript, openSecureCheckout, paymentFailureReason } from '../utils/razorpayCheckout';
 import { useAuth } from '../context/AuthContext';
+
+// Some course records have long pipe-separated subject lists split across
+// multiple `features` entries (a data-entry artifact), leaving an entry like
+// "| Psychology | Sociology" orphaned from the line before it. Merge any
+// entry starting with "|" into its predecessor so it reads as one list.
+const normalizeFeatures = (raw: string[]): string[] => {
+  const merged: string[] = [];
+  for (const item of raw) {
+    const trimmed = item.trim();
+    if (trimmed.startsWith('|') && merged.length > 0) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]} ${trimmed}`;
+    } else {
+      merged.push(trimmed);
+    }
+  }
+  return merged;
+};
 
 declare global {
   interface Window { Razorpay: any; }
@@ -26,6 +50,8 @@ interface Course {
   image?: string;
   materials?: CourseMaterial[];
   isActive: boolean;
+  enrolledCount?: number;
+  rating?: number;
 }
 
 interface CourseMaterial {
@@ -40,16 +66,22 @@ interface CourseMaterial {
   noteContent?: string;
 }
 
-const loadRazorpayScript = (): Promise<boolean> =>
-  new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true);
-    const s = document.createElement('script');
-    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    s.onload = () => resolve(true);
-    s.onerror = () => resolve(false);
-    document.body.appendChild(s);
-  });
+interface PlanBundle {
+  _id: string;
+  title: string;
+  description: string;
+  price: number;
+  mockTests: { _id: string; title: string; durationMinutes: number; category: string; chapter: string }[];
+  courses: { _id: string; title: string; subtitle: string; category: string; image: string }[];
+}
 
+// Rotating accent palette per card — mirrors the tint language used across the homepage
+const CARD_TINTS = [
+  { chip: 'bg-[#EEF0FF] text-[#6B7CFF]', ring: 'ring-[#DCE2FF]', btn: 'bg-[#111827] hover:bg-[#1F2937]', bar: 'bg-[#6B7CFF]' },
+  { chip: 'bg-[#E7F8EF] text-[#1F9D55]', ring: 'ring-[#CFEFDC]', btn: 'bg-[#111827] hover:bg-[#1F2937]', bar: 'bg-[#1F9D55]' },
+  { chip: 'bg-[#FFF1E8] text-[#E07A1F]', ring: 'ring-[#FBE3CE]', btn: 'bg-[#111827] hover:bg-[#1F2937]', bar: 'bg-[#E07A1F]' },
+  { chip: 'bg-[#F3EEFF] text-[#9B8AF5]', ring: 'ring-[#E4DBFF]', btn: 'bg-[#111827] hover:bg-[#1F2937]', bar: 'bg-[#9B8AF5]' },
+];
 
 const CoursesPage: React.FC = () => {
   const { user: clerkUser } = useAuth();
@@ -57,18 +89,21 @@ const CoursesPage: React.FC = () => {
   const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+  const [plans, setPlans] = useState<PlanBundle[]>([]);
+  const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
+  const [buyingPlanId, setBuyingPlanId] = useState<string | null>(null);
+  const [planReferralCode, setPlanReferralCode] = useState('');
+  const [planCouponCode, setPlanCouponCode] = useState('');
+  const [planPayError, setPlanPayError] = useState('');
 
-  // Use the authenticated backend user from AuthContext only.
   const user = clerkUser;
 
-  // Track which specific course IDs the user has already purchased
   const [isEnrolled, setIsEnrolled] = useState(false);
   const [enrolledCourseIds, setEnrolledCourseIds] = useState<Set<string>>(new Set());
 
   const [purchased, setPurchased] = useState(false);
   const [pendingCourse, setPendingCourse] = useState<Course | null>(null);
 
-  // Student details modal state (shown before payment)
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [studentDetails, setStudentDetails] = useState({
     name: '',
@@ -76,44 +111,57 @@ const CoursesPage: React.FC = () => {
     email: '',
     stream: '',
     referralCode: '',
+    couponCode: '',
   });
   const [detailsErrors, setDetailsErrors] = useState<{ name?: string; phone?: string }>({});
   const [savingDetails, setSavingDetails] = useState(false);
-  const [inlineReferralInfo, setInlineReferralInfo] = useState<{ name: string; _id: string } | null>(null);
-  const [inlineReferralError, setInlineReferralError] = useState('');
-  const [inlineReferralPrice, setInlineReferralPrice] = useState<number | null>(null);
-  const [validatingInlineReferral, setValidatingInlineReferral] = useState(false);
+  const [payError, setPayError] = useState('');
+  const [payPhase, setPayPhase] = useState<PaymentPhase>('review');
+  const [receipt, setReceipt] = useState<PaymentReceipt>(emptyReceipt);
+  const [planPay, setPlanPay] = useState<null | { phase: Exclude<PaymentPhase, 'review'>; receipt: PaymentReceipt; plan: PlanBundle }>(null);
 
-  // Derive the featured paid course from what the backend returns
   const premiumCourse = courses.find(c => c.isPaid) || null;
+
+  const closeDetailsModal = () => {
+    if (payPhase === 'processing') return;
+    setShowDetailsModal(false);
+    setPendingCourse(null);
+    setPayPhase('review');
+    setPayError('');
+  };
 
   useEffect(() => {
     fetchCourses();
   }, []);
 
+  // Let Escape close the enrollment details modal, same as clicking the backdrop or ×.
+  useEffect(() => {
+    if (!showDetailsModal) return;
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') closeDetailsModal(); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDetailsModal]);
+
   // Auto-enroll: triggered from homepage "Enroll Now" or after login redirect back to /courses
   useEffect(() => {
     const shouldAutoEnroll = sessionStorage.getItem('autoEnroll') === 'true';
     if (!shouldAutoEnroll) return;
-    if (loading) return; // wait for courses to load first
+    if (loading) return;
     const isLoggedIn = !!(isClerkSignedIn || user);
     if (!isLoggedIn) {
-      // Not logged in yet — keep the flag, redirect to login
       sessionStorage.setItem('postLoginRedirect', '/courses');
       navigate('/login');
       return;
     }
-    // Logged in — clear flag and kick off the flow
     sessionStorage.removeItem('autoEnroll');
     const target = courses.find(c => c.isPaid && c.isActive) || courses[0];
     if (target) {
-      // Small delay so page render settles before modal opens
       setTimeout(() => handleEnrollClick(target), 150);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, isClerkSignedIn, user]);
 
-  // Check enrollment status when user is available
   useEffect(() => {
     if (!user) return;
     enrollmentsApi
@@ -121,7 +169,6 @@ const CoursesPage: React.FC = () => {
       .then((res) => {
         const enrollments = res.data || [];
         setIsEnrolled(enrollments.length > 0);
-        // Build set of enrolled course IDs (courseSlug or courseId._id)
         const ids = new Set<string>();
         enrollments.forEach((e: any) => {
           if (e.courseId?._id) ids.add(e.courseId._id);
@@ -132,6 +179,66 @@ const CoursesPage: React.FC = () => {
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clerkUser]);
+
+  useEffect(() => {
+    plansApi.listPublic()
+      .then((res: any) => setPlans(res.data || []))
+      .catch(() => setPlans([]));
+  }, []);
+
+  const buyPlan = async (plan: PlanBundle) => {
+    if (!(isClerkSignedIn || user)) {
+      sessionStorage.setItem('postLoginRedirect', '/courses');
+      navigate('/login');
+      return;
+    }
+    setBuyingPlanId(plan._id);
+    setPlanPayError('');
+    setPlanPay({ phase: 'processing', plan, receipt: { title: plan.title, amount: plan.price, orderId: '', reason: '' } });
+    let orderId = '';
+    try {
+      const loaded = await loadRazorpayScript();
+      if (!loaded) throw new Error('The secure payment window could not be opened. Check your connection and retry.');
+      const orderRes = await paymentsApi.createOrder({
+        amount: plan.price,
+        purpose: 'plan',
+        purposeId: plan._id,
+        purposeModel: 'Plan',
+        referralCode: planReferralCode.trim() || undefined,
+        couponCode: planCouponCode.trim() || undefined,
+      });
+      const order = orderRes.data;
+      orderId = order.orderId;
+      const receiptNext = { title: plan.title, amount: order.finalAmountInRupees || plan.price, orderId, reason: '' };
+      setPlanPay({ phase: 'processing', plan, receipt: receiptNext });
+      const prefillUser = user || clerkUser;
+      await openSecureCheckout({
+        orderId,
+        amount: order.amount,
+        currency: order.currency,
+        keyId: order.keyId,
+        description: order.rewardDiscount > 0 ? `${plan.title} (₹${order.rewardDiscount} off applied)` : plan.title,
+        prefill: {
+          name: (prefillUser as any)?.name || (prefillUser as any)?.fullName || '',
+          email: (prefillUser as any)?.email || (prefillUser as any)?.primaryEmailAddress?.emailAddress || '',
+        },
+      });
+      setPlanPay({ phase: 'paid', plan, receipt: receiptNext });
+    } catch (err: any) {
+      if (!orderId && !(err instanceof CheckoutClosed)) {
+        setPlanPay(null);
+        setPlanPayError(paymentFailureReason(err));
+        return;
+      }
+      setPlanPay((current) => current && ({
+        ...current,
+        phase: 'failed',
+        receipt: { ...current.receipt, orderId: orderId || current.receipt.orderId, reason: paymentFailureReason(err) },
+      }));
+    } finally {
+      setBuyingPlanId(null);
+    }
+  };
 
   const fetchCourses = async () => {
     try {
@@ -145,118 +252,81 @@ const CoursesPage: React.FC = () => {
     }
   };
 
-  const handleEnroll = async (targetCourse: Course, referralCode?: string) => {
+  const handleEnroll = async (targetCourse: Course, referralCode?: string, couponCode?: string) => {
     if (!targetCourse) return;
 
-    // 1. Must be logged in (use Clerk state to avoid false negatives from backend sync delays)
     if (!(isClerkSignedIn || user)) {
       sessionStorage.setItem('postLoginRedirect', '/courses');
       navigate('/login');
       return;
     }
 
-    // 2. Already enrolled in THIS specific course → go to dashboard
     if (enrolledCourseIds.has(targetCourse._id)) {
       navigate('/student/dashboard');
       return;
     }
 
+    setPayPhase('processing');
+    setReceipt({ title: targetCourse.title, amount: targetCourse.price, orderId: '', reason: '' });
+    let orderId = '';
     try {
-      // 3. Load Razorpay SDK
       const loaded = await loadRazorpayScript();
-      if (!loaded) {
-        console.error('Could not load payment gateway.');
-        return;
-      }
-
-      // 4. Create order on backend
-      const effectivePrice = referralCode && targetCourse.referralPrice && targetCourse.referralPrice > 0
-        ? targetCourse.referralPrice
-        : targetCourse.price;
+      if (!loaded) throw new Error('The secure payment window could not be opened. Check your connection and retry.');
 
       const orderRes = await paymentsApi.createOrder({
-        amount: effectivePrice,
+        amount: targetCourse.price,
         purpose: 'course_enrollment',
         courseSlug: targetCourse._id,
         referralCode: referralCode || undefined,
+        couponCode: couponCode || undefined,
       });
-      const { orderId, amount, currency, keyId } = orderRes.data;
+      const order = orderRes.data;
+      orderId = order.orderId;
+      const receiptNext = { title: targetCourse.title, amount: order.finalAmountInRupees || targetCourse.price, orderId, reason: '' };
+      setReceipt(receiptNext);
 
-      // 5. Open Razorpay checkout
-      // user may be null if backend sync is delayed — fall back to clerkUser fields
       const prefillUser = user || clerkUser;
-      await new Promise<void>((resolve, reject) => {
-        const options = {
-          key: keyId || process.env.REACT_APP_RAZORPAY_KEY_ID,
-          amount,
-          currency,
-          name: 'Heystudent',
-          description: targetCourse.title,
-          order_id: orderId,
-          prefill: {
-            name: (prefillUser as any)?.name || (prefillUser as any)?.fullName || '',
-            email: (prefillUser as any)?.email || (prefillUser as any)?.primaryEmailAddress?.emailAddress || '',
-            contact: (prefillUser as any)?.phone || '',
-          },
-          theme: { color: '#f59e0b' },
-          modal: {
-            ondismiss: () => reject(new Error('Payment cancelled')),
-          },
-          handler: async (response: any) => {
-            try {
-              // 6. Verify payment on backend (auto-enrolls)
-              await paymentsApi.verifyPayment({
-                razorpayOrderId: response.razorpay_order_id,
-                razorpayPaymentId: response.razorpay_payment_id,
-                razorpaySignature: response.razorpay_signature,
-              });
-              setIsEnrolled(true);
-              setEnrolledCourseIds(prev => new Set(Array.from(prev).concat(targetCourse._id)));
-              setPurchased(true);
-              resolve();
-            } catch (err) {
-              reject(err);
-            }
-          },
-        };
-
-        const rzp = new window.Razorpay(options);
-        rzp.on('payment.failed', (response: any) => {
-          reject(new Error(response.error?.description || 'Payment failed'));
-        });
-        rzp.open();
+      await openSecureCheckout({
+        orderId,
+        amount: order.amount,
+        currency: order.currency,
+        keyId: order.keyId,
+        description: order.rewardDiscount > 0 ? `${targetCourse.title} (₹${order.rewardDiscount} off applied)` : targetCourse.title,
+        prefill: {
+          name: (prefillUser as any)?.name || (prefillUser as any)?.fullName || '',
+          email: (prefillUser as any)?.email || (prefillUser as any)?.primaryEmailAddress?.emailAddress || '',
+          contact: (prefillUser as any)?.phone || '',
+        },
       });
-
-      // 7. Payment done → show confirmation then go to student dashboard
-      setTimeout(() => navigate('/student/dashboard'), 3000);
+      setIsEnrolled(true);
+      setEnrolledCourseIds(prev => new Set(Array.from(prev).concat(targetCourse._id)));
+      setPayPhase('paid');
     } catch (err: any) {
-      if (err?.message !== 'Payment cancelled') {
-        console.error('Payment error:', err?.message || 'Payment failed.');
+      if (!orderId && !(err instanceof CheckoutClosed)) {
+        setPayPhase('review');
+        setPayError(paymentFailureReason(err));
+        return;
       }
+      setReceipt((current) => ({ ...current, orderId: orderId || current.orderId, reason: paymentFailureReason(err) }));
+      setPayPhase('failed');
     }
   };
 
-  // Open referral modal before purchase
   const handleEnrollClick = (course: Course) => {
-    // Use Clerk sign-in state as the source of truth so a failed backend
-    // sync never redirects an already-signed-in user to /login
     const isLoggedIn = !!(isClerkSignedIn || user);
     if (!isLoggedIn) {
       sessionStorage.setItem('postLoginRedirect', '/courses');
-      sessionStorage.setItem('autoEnroll', 'true'); // resume flow after login
+      sessionStorage.setItem('autoEnroll', 'true');
       navigate('/login');
       return;
     }
-    // Only block if this specific course is already purchased
     if (enrolledCourseIds.has(course._id)) {
       navigate('/student/dashboard');
       return;
     }
 
-    // Set the pending course
     setPendingCourse(course);
 
-    // Pre-fill student details from the logged-in user profile
     const prefillUser = user || clerkUser;
     setStudentDetails({
       name: (prefillUser as any)?.name || (prefillUser as any)?.fullName || '',
@@ -264,82 +334,67 @@ const CoursesPage: React.FC = () => {
       email: (prefillUser as any)?.email || (prefillUser as any)?.primaryEmailAddress?.emailAddress || '',
       stream: '',
       referralCode: '',
+      couponCode: '',
     });
     setDetailsErrors({});
-    setInlineReferralInfo(null);
-    setInlineReferralError('');
-    setInlineReferralPrice(null);
+    setPayError('');
 
-    // Show student details modal first
     setShowDetailsModal(true);
   };
 
-  // Handle student details form submission → save lead → proceed straight to payment
   const handleDetailsSubmit = async () => {
     const errors: { name?: string; phone?: string } = {};
     if (!studentDetails.name.trim()) errors.name = 'Name is required';
     if (!studentDetails.phone.trim()) errors.phone = 'Phone number is required';
     if (Object.keys(errors).length > 0) { setDetailsErrors(errors); return; }
+    if (!pendingCourse) return;
 
     setSavingDetails(true);
+    setPayError('');
     try {
       await paymentsApi.savePrePaymentLead({
         name: studentDetails.name.trim(),
         phone: studentDetails.phone.trim(),
         email: studentDetails.email.trim() || undefined,
-        // Keep backend compatibility: existing model uses `college`, we store selected stream there.
         college: studentDetails.stream || undefined,
-        courseId: pendingCourse?._id,
-        courseTitle: pendingCourse?.title,
+        courseId: pendingCourse._id,
+        courseTitle: pendingCourse.title,
         source: 'enrollment_form',
       });
     } catch { /* non-blocking */ }
 
-    // Validate referral code inline if provided
-    let appliedCode: string | undefined;
-    if (studentDetails.referralCode.trim()) {
-      setValidatingInlineReferral(true);
-      try {
-        const res = await authApi.verifyReferralCode(studentDetails.referralCode.trim().toUpperCase());
-        if (res?.data?.valid && res?.data?.institute) {
-          appliedCode = studentDetails.referralCode.trim().toUpperCase();
-          setInlineReferralInfo(res.data.institute);
-          if (pendingCourse?.referralPrice && pendingCourse.referralPrice > 0) {
-            setInlineReferralPrice(pendingCourse.referralPrice);
-          }
-        } else {
-          setInlineReferralError('Invalid referral code. Proceeding without discount.');
-        }
-      } catch {
-        setInlineReferralError('Could not validate referral code. Proceeding without discount.');
-      } finally {
-        setValidatingInlineReferral(false);
-      }
+    try {
+      await handleEnroll(
+        pendingCourse,
+        studentDetails.referralCode.trim() || undefined,
+        studentDetails.couponCode.trim() || undefined,
+      );
+    } finally {
+      setSavingDetails(false);
     }
-
-    setSavingDetails(false);
-    setShowDetailsModal(false);
-    if (pendingCourse) await handleEnroll(pendingCourse, appliedCode);
   };
 
   return (
-    <div className="min-h-screen bg-[#fff9ed]">
+    <div className="hs-page">
+      <Helmet>
+        <title>CUET Courses — Commerce, Arts & More | HeyStudent</title>
+        <meta name="description" content="Browse CUET courses in Commerce, Arts and more with live classes, recorded lectures and mock tests from top-ranking educators." />
+        <link rel="canonical" href="https://heystudent.in/courses" />
+      </Helmet>
       <SharedNavbar />
 
-      {/* Purchase success banner */}
+      {/* Purchase success overlay */}
       {purchased && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
           <div className="bg-white rounded-3xl shadow-2xl p-10 max-w-sm w-full text-center">
-            <div className="w-16 h-16 bg-amber-400 rounded-full flex items-center justify-center mx-auto mb-5">
-              <svg className="w-8 h-8 text-black" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-              </svg>
+            <div className="w-16 h-16 bg-[#111827] rounded-full flex items-center justify-center mx-auto mb-5">
+              <CheckCircle2 className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-2xl font-extrabold text-black mb-2">You're in! 🎉</h2>
-            <p className="text-neutral-500 mb-6">Your enrollment is confirmed. Redirecting you to your dashboard…</p>
+            <h2 className="text-2xl font-extrabold text-[#101828] mb-2">You're in! 🎉</h2>
+            <p className="text-[#64748B] mb-6">Your enrollment is confirmed. Redirecting you to your dashboard…</p>
             <button
               onClick={() => navigate('/student/dashboard')}
-              className="w-full bg-amber-400 hover:bg-amber-300 text-black font-bold py-3 rounded-xl transition-colors"
+              className="w-full bg-[#111827] hover:bg-[#1F2937] text-white font-bold py-3 rounded-xl transition-colors"
             >
               Go to Dashboard →
             </button>
@@ -347,19 +402,40 @@ const CoursesPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Single Enrollment Form Modal ─────────────────────────── */}
+      {/* Enrollment details modal */}
       {showDetailsModal && pendingCourse && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full">
-            <h2 className="text-2xl font-extrabold text-black mb-1">Almost there! 🎓</h2>
-            <p className="text-neutral-500 text-sm mb-6">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={(e) => { if (e.target === e.currentTarget && payPhase !== 'processing') closeDetailsModal(); }}
+        >
+          <div className={`relative w-full max-h-[90vh] overflow-y-auto bg-white shadow-2xl ${payPhase === 'review' ? 'max-w-md rounded-3xl p-8' : 'max-w-xl rounded-2xl'}`}>
+            {payPhase !== 'processing' && (
+            <button
+              onClick={closeDetailsModal}
+              aria-label="Close"
+              className="absolute right-5 top-5 z-10 flex h-8 w-8 items-center justify-center rounded-full text-[#94A3B8] transition-colors hover:bg-[#F1F5F9] hover:text-[#101828]"
+            >
+              <X size={18} />
+            </button>
+            )}
+            {payPhase !== 'review' ? (
+              <PaymentStage
+                phase={payPhase}
+                receipt={receipt}
+                onRetry={handleDetailsSubmit}
+                onBack={payPhase === 'failed' ? () => { setPayPhase('review'); setPayError(''); } : undefined}
+                onContinue={() => navigate('/student/dashboard')}
+              />
+            ) : (
+            <>
+            <h2 className="text-2xl font-extrabold text-[#101828] mb-1 pr-8">Almost there! 🎓</h2>
+            <p className="text-[#64748B] text-sm mb-6">
               Fill in your details to get instant course access.
             </p>
 
             <div className="flex flex-col gap-4">
-              {/* Name */}
               <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
                   Full Name <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -367,14 +443,13 @@ const CoursesPage: React.FC = () => {
                   value={studentDetails.name}
                   onChange={e => { setStudentDetails(p => ({ ...p, name: e.target.value })); setDetailsErrors(p => ({ ...p, name: undefined })); }}
                   placeholder="Your full name"
-                  className={`w-full px-4 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-black text-sm ${detailsErrors.name ? 'border-red-400' : 'border-neutral-300'}`}
+                  className={`w-full px-4 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#111827] text-sm ${detailsErrors.name ? 'border-red-400' : 'border-slate-300'}`}
                 />
                 {detailsErrors.name && <p className="text-red-500 text-xs mt-1">{detailsErrors.name}</p>}
               </div>
 
-              {/* Phone */}
               <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
                   Phone / WhatsApp <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -382,30 +457,28 @@ const CoursesPage: React.FC = () => {
                   value={studentDetails.phone}
                   onChange={e => { setStudentDetails(p => ({ ...p, phone: e.target.value })); setDetailsErrors(p => ({ ...p, phone: undefined })); }}
                   placeholder="10-digit mobile number"
-                  className={`w-full px-4 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-black text-sm ${detailsErrors.phone ? 'border-red-400' : 'border-neutral-300'}`}
+                  className={`w-full px-4 py-2.5 border rounded-xl focus:outline-none focus:ring-2 focus:ring-[#111827] text-sm ${detailsErrors.phone ? 'border-red-400' : 'border-slate-300'}`}
                 />
                 {detailsErrors.phone && <p className="text-red-500 text-xs mt-1">{detailsErrors.phone}</p>}
               </div>
 
-              {/* Email */}
               <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">Email</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Email</label>
                 <input
                   type="email"
                   value={studentDetails.email}
                   onChange={e => setStudentDetails(p => ({ ...p, email: e.target.value }))}
                   placeholder="your@email.com"
-                  className="w-full px-4 py-2.5 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-black text-sm"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#111827] text-sm"
                 />
               </div>
 
-              {/* Stream */}
               <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">Stream</label>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">Stream</label>
                 <select
                   value={studentDetails.stream}
                   onChange={e => setStudentDetails(p => ({ ...p, stream: e.target.value }))}
-                  className="w-full px-4 py-2.5 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-black text-sm bg-white"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#111827] text-sm bg-white"
                 >
                   <option value="">Select stream</option>
                   <option value="Science">Science</option>
@@ -414,382 +487,468 @@ const CoursesPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* Referral Code */}
               <div>
-                <label className="block text-sm font-semibold text-neutral-700 mb-1">
-                  Referral Code <span className="text-neutral-400 font-normal">(optional)</span>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  Referral code <span className="text-slate-400 font-normal">(optional)</span>
                 </label>
                 <input
                   type="text"
                   value={studentDetails.referralCode}
-                  onChange={e => { setStudentDetails(p => ({ ...p, referralCode: e.target.value.toUpperCase() })); setInlineReferralError(''); setInlineReferralInfo(null); }}
-                  placeholder="e.g. INST1234"
-                  className="w-full px-4 py-2.5 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-black text-sm font-mono uppercase"
+                  onChange={e => { setStudentDetails(p => ({ ...p, referralCode: e.target.value.toUpperCase() })); setPayError(''); }}
+                  placeholder="Student or institute code"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#111827] text-sm font-mono uppercase"
                 />
-                {inlineReferralError && <p className="text-amber-600 text-xs mt-1">{inlineReferralError}</p>}
-                {inlineReferralInfo && <p className="text-green-600 text-xs mt-1">✓ Code from <span className="font-semibold">{inlineReferralInfo.name}</span> applied{inlineReferralPrice ? `: ₹${inlineReferralPrice}` : ''}.</p>}
               </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  Coupon code <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={studentDetails.couponCode}
+                  onChange={e => { setStudentDetails(p => ({ ...p, couponCode: e.target.value.toUpperCase() })); setPayError(''); }}
+                  placeholder="Coupon"
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#111827] text-sm font-mono uppercase"
+                />
+              </div>
+              {payError && <p role="alert" className="rounded-lg border border-[#F3D0D0] bg-[#FFF6F6] px-3 py-2.5 text-[13px] leading-relaxed text-[#B42318]">{payError}</p>}
             </div>
 
             <button
               onClick={handleDetailsSubmit}
-              disabled={savingDetails || validatingInlineReferral}
-              className="mt-6 w-full bg-amber-400 hover:bg-amber-300 text-black font-bold py-3 rounded-xl transition-colors disabled:opacity-60"
+              disabled={savingDetails}
+              className="mt-6 w-full bg-[#111827] hover:bg-[#1F2937] text-white font-semibold py-3 rounded-full transition-colors disabled:opacity-60"
             >
-              {savingDetails || validatingInlineReferral ? 'Please wait…' : `Pay ₹${pendingCourse.price} →`}
+              {savingDetails ? 'Please wait…' : `Pay ₹${pendingCourse.price.toLocaleString('en-IN')} →`}
             </button>
+            </>
+            )}
           </div>
         </div>
       )}
 
-      {/* ── WhatsApp Free Resources Banner ────────────────────────── */}
-      <div className="w-full bg-[#25D366] px-4 py-3 mt-16">
-        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <svg className="w-6 h-6 text-white shrink-0" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-            </svg>
-            <p className="text-white font-bold text-sm">Join our <span className="underline underline-offset-2">Free Resources</span> WhatsApp group — notes, PYQs &amp; more!</p>
-          </div>
-          <a
-            href="https://chat.whatsapp.com/Jiy3lsVbecL52QoQwNVl03?mode=hqctcli"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="shrink-0 bg-white text-[#25D366] font-extrabold text-xs px-4 py-2 rounded-xl hover:bg-green-50 transition-colors whitespace-nowrap"
-          >
-            Join Free Group →
-          </a>
+      {planPay && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 px-4 py-8">
+          <section className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <PaymentStage
+              phase={planPay.phase}
+              receipt={planPay.receipt}
+              onRetry={() => buyPlan(planPay.plan)}
+              onBack={planPay.phase === 'failed' ? () => setPlanPay(null) : undefined}
+              onContinue={() => navigate('/student/dashboard')}
+            />
+          </section>
         </div>
-      </div>
+      )}
 
-      {/* Header Section */}
-      <div className="pt-8 pb-10 px-4 text-center">
-        <div className="max-w-2xl mx-auto">
-          <p className="text-xs font-bold tracking-widest uppercase text-amber-600 mb-3">Courses</p>
-          <h1 className="text-3xl md:text-4xl font-extrabold text-black mb-3">Find Your Course</h1>
-          <p className="text-neutral-500 text-base">
-            Curated by All India Rankers. Built for serious students.
-          </p>
-        </div>
-      </div>
-
-      {/* ── COURSE CAROUSEL ──────────────────────────────────── */}
-      <CourseCarousel
-        courses={courses}
-        loading={loading}
-        isEnrolled={isEnrolled}
-        enrolledCourseIds={Array.from(enrolledCourseIds)}
-        onEnroll={handleEnrollClick}
-      />
-
-      {/* CTA Section */}
-      <div className="py-14 px-4 mb-10">
-        <div className="max-w-3xl mx-auto">
-          <div className="bg-black rounded-2xl p-8 md:p-10 text-center">
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">Ready to Start Learning?</h2>
-            <p className="text-neutral-400 max-w-xl mx-auto mb-6 text-sm">
-              Join thousands of students already enhancing their skills with our curated courses.
-            </p>
-            <button
-              onClick={() => { const c = premiumCourse || courses[0]; if (c) handleEnrollClick(c); }}
-              className="inline-flex items-center justify-center px-8 py-3.5 text-sm font-bold rounded-xl text-black bg-amber-400 hover:bg-amber-300 transition-colors focus:outline-none"
-            >
-              {isEnrolled ? 'Go to Dashboard →' : 'Enroll Now →'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ─── CourseCarousel component ──────────────────────────────────────── */
-interface CourseCarouselProps {
-  courses: Course[];
-  loading: boolean;
-  isEnrolled: boolean;
-  enrolledCourseIds: string[];
-  onEnroll: (course: Course) => void;
-}
-
-const CourseCarousel: React.FC<CourseCarouselProps> = ({ courses, loading, isEnrolled, enrolledCourseIds, onEnroll }) => {
-  const [active, setActive] = useState(0);
-  const touchStartX = useRef<number | null>(null);
-  const touchEndX = useRef<number | null>(null);
-
-  const prev = useCallback(() => setActive(i => (i === 0 ? courses.length - 1 : i - 1)), [courses.length]);
-  const next = useCallback(() => setActive(i => (i === courses.length - 1 ? 0 : i + 1)), [courses.length]);
-
-  const onTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
-  const onTouchMove  = (e: React.TouchEvent) => { touchEndX.current = e.touches[0].clientX; };
-  const onTouchEnd   = () => {
-    if (touchStartX.current === null || touchEndX.current === null) return;
-    const diff = touchStartX.current - touchEndX.current;
-    if (Math.abs(diff) > 40) diff > 0 ? next() : prev();
-    touchStartX.current = touchEndX.current = null;
-  };
-
-  if (loading) {
-    return (
-      <div className="px-4 pb-16 max-w-2xl mx-auto">
-        <div className="bg-[#111] rounded-3xl h-[520px] animate-pulse border border-white/5" />
-      </div>
-    );
-  }
-
-  if (courses.length === 0) {
-    return (
-      <div className="text-center py-24 text-neutral-400">No courses available right now.</div>
-    );
-  }
-
-  return (
-    <div className="pb-16 px-4">
-      <div className="max-w-2xl mx-auto relative">
-        {/* Cards */}
-        <div
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={onTouchEnd}
-          className="relative"
+      {/* ══════════════════ HERO ══════════════════ */}
+      <section className="relative overflow-hidden" style={{ background: 'linear-gradient(180deg, #EEF1FF 0%, #F7F9FC 55%, #FFFFFF 100%)' }}>
+        {/* Decorative ring motif */}
+        <svg
+          className="pointer-events-none absolute -right-28 -top-28 hidden h-[460px] w-[460px] text-[#C9D2E3] opacity-60 lg:block"
+          viewBox="0 0 420 420"
+          aria-hidden="true"
         >
-          {courses.map((course, idx) => {
-            const isCurrent = idx === active;
-            if (!isCurrent) return null;
-            const cats = Array.isArray(course.category)
-              ? course.category
-              : course.category ? [course.category] : [];
-            const isPopular = idx === 0;
-            const savings = (course.originalPrice && course.originalPrice > course.price)
-              ? course.originalPrice - course.price : null;
-            const features = course.features?.length ? course.features : [course.description];
+          <circle cx="210" cy="210" r="70" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="210" cy="210" r="120" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="210" cy="210" r="170" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="210" cy="210" r="210" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+        <div className="hs-blob pointer-events-none absolute -left-24 top-[10%] h-72 w-72 rounded-full bg-[#AEBCFF] opacity-30 blur-[100px]" aria-hidden="true" />
+        <div className="hs-blob pointer-events-none absolute right-[12%] bottom-0 h-64 w-64 rounded-full bg-[#FBC58D] opacity-25 blur-[100px]" style={{ animationDelay: '-4s' }} aria-hidden="true" />
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-[300px] opacity-[0.35]"
+          style={{
+            backgroundImage: 'radial-gradient(#B9C3F5 1.4px, transparent 1.4px)',
+            backgroundSize: '26px 26px',
+            maskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(180deg, black 0%, transparent 100%)',
+          }}
+          aria-hidden="true"
+        />
 
-            return (
-              <PricingCard
-                key={course._id}
-                course={course}
-                cats={cats}
-                isPopular={isPopular}
-                savings={savings}
-                features={features}
-              isEnrolled={enrolledCourseIds.includes(course._id)}
-                onEnroll={() => onEnroll(course)}
-              />
-            );
-          })}
+        <div className="relative px-6 pb-16 pt-14 lg:px-10 lg:pb-20 lg:pt-20">
+          <div className="mx-auto max-w-5xl text-center">
+            <p className="hs-hero-eyebrow inline-flex items-center gap-2 justify-center">
+              <Sparkles size={14} className="text-[#6B7CFF]" />
+              CUET courses
+            </p>
+            <h1 className="mt-4">
+              Courses built for your
+              <span className="accent block">CUET success</span>
+            </h1>
+            <p className="hs-hero-description mx-auto mt-5 max-w-xl">
+              Structured batches for Commerce, Arts and Science — live classes, mock tests, PYQs and mentor support, designed by CUET rankers.
+            </p>
+
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <a
+                href="#course-list"
+                className="inline-flex items-center gap-2 rounded-md bg-[#111827] px-6 py-3 text-[15px] font-semibold text-white shadow-[0_8px_20px_rgba(17,24,39,0.18)] hover:bg-[#1F2937] transition-colors"
+              >
+                Explore Batches <ChevronDown size={16} />
+              </a>
+              <Link
+                to="/mock-tests"
+                className="inline-flex items-center gap-2 rounded-md border border-[#D0D5DD] bg-white px-6 py-3 text-[15px] font-semibold text-[#101828] hover:bg-slate-50 transition-colors"
+              >
+                <PlayCircle size={16} className="text-[#6B7CFF]" /> Try a Free Mock Test
+              </Link>
+            </div>
+          </div>
+
+          {/* Stat strip — distinct cards instead of a plain text row */}
+          <div className="mx-auto mt-12 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
+            {[
+              { icon: GraduationCap, tint: 'bg-[#EEF0FF] text-[#6B7CFF]', label: 'Taught by DU rankers', sub: 'AIR 19 & AIR 63, CUET 2023' },
+              { icon: TrendingUp, tint: 'bg-[#E7F8EF] text-[#1F9D55]', label: '1000+ students guided', sub: 'Across Commerce, Arts, Science' },
+              { icon: ShieldCheck, tint: 'bg-[#FFF1E8] text-[#E07A1F]', label: 'Secure checkout', sub: 'Razorpay · 100% safe' },
+            ].map((stat) => (
+              <div key={stat.label} className="flex items-center gap-3 rounded-2xl border border-[#E8EDF4] bg-white/80 px-4 py-3.5 backdrop-blur-sm">
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${stat.tint}`}>
+                  <stat.icon size={19} strokeWidth={2.2} />
+                </span>
+                <div className="min-w-0 text-left">
+                  <p className="truncate text-[13.5px] font-bold text-[#101828]">{stat.label}</p>
+                  <p className="truncate text-[12px] text-[#94A3B8]">{stat.sub}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
+      </section>
 
-        {/* Navigation arrows — only show when >1 course */}
-        {courses.length > 1 && (
-          <>
-            <button
-              onClick={prev}
-              className="absolute -left-4 md:-left-12 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center bg-white border border-neutral-200 rounded-full shadow-md hover:bg-neutral-50 transition-colors z-10"
-              aria-label="Previous course"
-            >
-              <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <button
-              onClick={next}
-              className="absolute -right-4 md:-right-12 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center bg-white border border-neutral-200 rounded-full shadow-md hover:bg-neutral-50 transition-colors z-10"
-              aria-label="Next course"
-            >
-              <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-
-            {/* Dots */}
-            <div className="flex justify-center gap-2 mt-6">
-              {courses.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActive(i)}
-                  className={`rounded-full transition-all duration-300 ${
-                    i === active
-                      ? 'w-6 h-2.5 bg-amber-400'
-                      : 'w-2.5 h-2.5 bg-neutral-300 hover:bg-neutral-400'
-                  }`}
-                  aria-label={`Go to course ${i + 1}`}
+      {/* ══════════════════ COURSE CARDS ══════════════════ */}
+      <section id="course-list" className="bg-white px-6 pb-20 pt-4 lg:px-10">
+        <div className="mx-auto max-w-6xl">
+          {loading ? (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="h-[560px] animate-pulse rounded-[22px] border border-[#E8EDF4] bg-slate-50" />
+              ))}
+            </div>
+          ) : courses.length === 0 ? (
+            <div className="rounded-[22px] border border-[#E8EDF4] bg-slate-50 py-20 text-center text-[#64748B]">
+              No courses available right now. Check back soon.
+            </div>
+          ) : (
+            <div className="grid items-start gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {courses.map((course, idx) => (
+                <CourseCard
+                  key={course._id}
+                  course={course}
+                  tint={CARD_TINTS[idx % CARD_TINTS.length]}
+                  isPopular={idx === 0}
+                  isEnrolled={enrolledCourseIds.has(course._id)}
+                  onEnroll={() => handleEnrollClick(course)}
                 />
               ))}
             </div>
+          )}
+        </div>
+      </section>
 
-            {/* Counter */}
-            <p className="text-center text-xs text-neutral-400 mt-2">
-              {active + 1} of {courses.length} courses
-            </p>
-          </>
-        )}
-      </div>
+      {/* ══════════════════ PLAN BUNDLES ══════════════════ */}
+      {plans.length > 0 && (
+        <section className="bg-[#F7F9FC] px-6 py-16 lg:px-10">
+          <div className="mx-auto max-w-6xl">
+            <div className="mx-auto max-w-xl text-center">
+              <p className="inline-flex items-center gap-2 text-[13px] font-bold uppercase tracking-[2px] text-[#9B8AF5]">
+                <Layers size={16} /> Bundles
+              </p>
+              <h2 className="why-title mt-3">Save more with a plan</h2>
+              <p className="mt-3 text-[15px] leading-relaxed text-[#64748B]">
+                A plan bundles multiple mock tests and courses at one price — buy once, unlock everything inside.
+              </p>
+            </div>
+            <div className="mx-auto mt-8 grid max-w-2xl gap-3 sm:grid-cols-2">
+              <label className="block text-left text-[13px] font-semibold text-[#344054]">
+                Referral code <span className="font-normal text-[#94A3B8]">(optional)</span>
+                <input
+                  value={planReferralCode}
+                  onChange={(e) => { setPlanReferralCode(e.target.value.toUpperCase()); setPlanPayError(''); }}
+                  placeholder="Student or institute code"
+                  className="mt-1.5 w-full rounded-lg border border-[#D0D5DD] bg-white px-3.5 py-2.5 font-mono text-[14px] uppercase focus:border-[#111827] focus:outline-none focus:ring-1 focus:ring-[#111827]"
+                />
+              </label>
+              <label className="block text-left text-[13px] font-semibold text-[#344054]">
+                Coupon code <span className="font-normal text-[#94A3B8]">(optional)</span>
+                <input
+                  value={planCouponCode}
+                  onChange={(e) => { setPlanCouponCode(e.target.value.toUpperCase()); setPlanPayError(''); }}
+                  placeholder="Coupon"
+                  className="mt-1.5 w-full rounded-lg border border-[#D0D5DD] bg-white px-3.5 py-2.5 font-mono text-[14px] uppercase focus:border-[#111827] focus:outline-none focus:ring-1 focus:ring-[#111827]"
+                />
+              </label>
+            </div>
+            {planPayError && <p role="alert" className="mx-auto mt-3 max-w-2xl rounded-lg border border-[#F3D0D0] bg-[#FFF6F6] px-3 py-2.5 text-left text-[13px] leading-relaxed text-[#B42318]">{planPayError}</p>}
+            <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {plans.map((plan) => {
+                const expanded = expandedPlanId === plan._id;
+                return (
+                  <div key={plan._id} className="flex flex-col rounded-[22px] border border-[#E8EDF4] bg-white p-6">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F3EEFF] text-[#9B8AF5]"><Layers size={18} /></span>
+                    <h3 className="mt-4 text-[17px] font-extrabold text-[#101828]">{plan.title}</h3>
+                    {plan.description && <p className="mt-1.5 text-[13.5px] leading-relaxed text-[#64748B]">{plan.description}</p>}
+                    <p className="mt-4 text-[26px] font-extrabold text-[#101828]">₹{plan.price.toLocaleString('en-IN')}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5 text-[11.5px] font-semibold text-[#64748B]">
+                      {plan.mockTests.length > 0 && <span className="rounded-full bg-[#F1F5F9] px-2.5 py-1">{plan.mockTests.length} mock test{plan.mockTests.length === 1 ? '' : 's'}</span>}
+                      {plan.courses.length > 0 && <span className="rounded-full bg-[#F1F5F9] px-2.5 py-1">{plan.courses.length} course{plan.courses.length === 1 ? '' : 's'}</span>}
+                    </div>
+
+                    <button
+                      onClick={() => setExpandedPlanId(expanded ? null : plan._id)}
+                      className="mt-4 inline-flex items-center gap-1 self-start text-[12.5px] font-semibold text-[#3267f5]"
+                    >
+                      {expanded ? 'Hide what’s included' : 'See what’s included'}
+                      <ChevronDown size={14} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {expanded && (
+                      <div className="mt-3 space-y-3 rounded-xl bg-[#F7F9FC] p-4">
+                        {plan.courses.length > 0 && (
+                          <div>
+                            <p className="text-[11px] font-bold uppercase tracking-[1px] text-[#94A3B8]">Courses</p>
+                            <ul className="mt-1.5 space-y-1">
+                              {plan.courses.map((c) => (
+                                <li key={c._id} className="flex items-center gap-2 text-[13px] text-[#344054]">
+                                  <CheckCircle2 size={14} className="shrink-0 text-[#1F9D55]" /> {c.title}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {plan.mockTests.length > 0 && (
+                          <div>
+                            <p className="text-[11px] font-bold uppercase tracking-[1px] text-[#94A3B8]">Mock tests</p>
+                            <ul className="mt-1.5 space-y-1">
+                              {plan.mockTests.map((t) => (
+                                <li key={t._id} className="flex items-center gap-2 text-[13px] text-[#344054]">
+                                  <CheckCircle2 size={14} className="shrink-0 text-[#1F9D55]" /> {t.title}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => buyPlan(plan)}
+                      disabled={buyingPlanId === plan._id}
+                      className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-[#111827] py-3 text-[14px] font-semibold text-white transition-colors hover:bg-[#1F2937] disabled:opacity-60"
+                    >
+                      {buyingPlanId === plan._id ? 'Processing…' : 'Buy this plan'} <ArrowRight size={15} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ══════════════════ BOTTOM CTA ══════════════════ */}
+      <section className="px-6 pb-16 lg:px-10">
+        <div className="mx-auto max-w-5xl">
+          <div className="relative overflow-hidden rounded-[28px] bg-[#EEF1FF] px-8 py-12 text-center sm:px-14">
+            <svg className="pointer-events-none absolute -right-20 -top-20 h-[360px] w-[360px] text-white/70" viewBox="0 0 420 420" aria-hidden="true">
+              <circle cx="210" cy="210" r="70" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="210" cy="210" r="120" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="210" cy="210" r="170" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+            <div className="relative">
+              <p className="mb-4 inline-flex items-center gap-3 text-[13px] font-bold uppercase tracking-[2px] text-[#94A3B8]">
+                <BadgeCheck size={16} className="text-[#6B7CFF]" />
+                Still deciding?
+              </p>
+              <h2 className="why-title mx-auto max-w-xl text-center">
+                Start your CUET prep with the right batch today
+              </h2>
+              <p className="mx-auto mt-4 max-w-md text-[16px] leading-relaxed text-[#64748B]">
+                Join a structured course for live classes, full syllabus coverage and mock tests — or take a free mock test first to see where you stand.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={() => { const c = premiumCourse || courses[0]; if (c) handleEnrollClick(c); }}
+                  disabled={!courses.length}
+                  className="inline-flex items-center gap-2 rounded-md bg-[#111827] px-6 py-3 text-[15px] font-semibold text-white hover:bg-[#1F2937] transition-colors disabled:opacity-50"
+                >
+                  {isEnrolled ? 'Go to Dashboard' : 'Enroll Now'} <ArrowRight size={16} />
+                </button>
+                <Link
+                  to="/mock-tests"
+                  className="inline-flex items-center rounded-md border border-[#D0D5DD] bg-white px-6 py-3 text-[15px] font-semibold text-[#101828] hover:bg-slate-50 transition-colors"
+                >
+                  Explore Mock Tests
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };
 
-/* ─── PricingCard component ─────────────────────────────────────────── */
-interface PricingCardProps {
+/* ─── CourseCard ─────────────────────────────────────────────────── */
+interface Tint { chip: string; ring: string; btn: string; bar: string; }
+
+interface CourseCardProps {
   course: Course;
-  cats: string[];
+  tint: Tint;
   isPopular: boolean;
-  savings: number | null;
-  features: string[];
   isEnrolled: boolean;
   onEnroll: () => void;
 }
 
-const PricingCard: React.FC<PricingCardProps> = ({
-  course, cats, isPopular, savings, features, isEnrolled, onEnroll
-}) => {
+const CourseCard: React.FC<CourseCardProps> = ({ course, tint, isPopular, isEnrolled, onEnroll }) => {
+  const cats = Array.isArray(course.category)
+    ? course.category
+    : course.category ? [course.category] : [];
+  const savings = (course.originalPrice && course.originalPrice > course.price)
+    ? course.originalPrice - course.price : null;
+  const rawFeatures = course.features?.length ? course.features : (course.description ? [course.description] : []);
+  const features = normalizeFeatures(rawFeatures);
+  const [showAll, setShowAll] = useState(false);
+  const SHOW = 5;
+  const visibleFeatures = showAll ? features : features.slice(0, SHOW);
+  const overflow = features.length - SHOW;
+
   return (
-    <div
-      className="group relative bg-[#0d0d0d] rounded-3xl overflow-hidden border border-white/10 hover:border-amber-400/40 transition-all duration-300 hover:shadow-[0_0_40px_rgba(251,191,36,0.12)]"
-      style={{ boxShadow: '0 4px 32px rgba(0,0,0,0.4)' }}
-    >
-      {/* Top amber accent stripe */}
-      <div className="h-1 w-full bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500" />
+    <div className="group relative flex h-full flex-col overflow-hidden rounded-[22px] border border-[#E8EDF4] bg-white transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_40px_rgba(16,24,40,0.1)]">
+      <span className={`h-1.5 w-full ${tint.bar}`} />
 
-      {/* Most Popular badge */}
-      {isPopular && (
-        <div className="absolute top-5 right-5 z-10">
-          <span className="bg-amber-400 text-black text-[10px] font-extrabold tracking-widest uppercase px-3 py-1 rounded-full shadow">
-            🔥 Most Popular
-          </span>
+      <div className="flex flex-1 flex-col p-6">
+        {/* Header row: category chip + popular badge */}
+        <div className="flex h-7 items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1.5">
+            {cats.slice(0, 2).map((cat) => (
+              <span key={cat} className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${tint.chip}`}>
+                {cat}
+              </span>
+            ))}
+          </div>
+          {isPopular && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#F6A15A] px-2.5 py-1 text-[11px] font-semibold text-white whitespace-nowrap">
+              <Star size={11} className="fill-white" /> Popular
+            </span>
+          )}
         </div>
-      )}
 
-      <div className="p-6 md:p-10">
-        {/* Course title */}
-        <h2 className="text-white font-extrabold text-xl md:text-2xl leading-tight mb-1 text-center">
-          {course.title}
-        </h2>
-        {course.subtitle && (
-          <p className="text-neutral-400 text-sm mb-5">{course.subtitle}</p>
-        )}
+        {/* Title + subtitle — fixed-height zone so price/CTA align across cards regardless of text length */}
+        <div className="mt-4 min-h-[88px]">
+          <h3 className="line-clamp-2 text-[20px] font-bold leading-snug text-[#101828]">{course.title}</h3>
+          {course.subtitle && (
+            <p className="mt-1.5 line-clamp-2 text-[13.5px] leading-snug text-[#64748B]">{course.subtitle}</p>
+          )}
+        </div>
 
-        {/* ── PRICE (dominant visual) ── */}
-        <div className="mb-5 rounded-2xl bg-white/[0.03] border border-white/[0.07] px-5 py-4">
-          <div
-            className="flex items-end gap-3 mb-1"
-            style={{ filter: 'drop-shadow(0 0 18px rgba(251,191,36,0.25))' }}
-          >
-            <span className="text-5xl md:text-6xl font-black text-white tracking-tight">
+        {/* Meta row: duration + level */}
+        <div className="flex min-h-[20px] flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px] text-[#64748B]">
+          {course.duration && (
+            <span className="inline-flex items-center gap-1.5">
+              <CalendarDays size={14} className="text-[#94A3B8]" /> {course.duration}
+            </span>
+          )}
+          {course.level && (
+            <span className="inline-flex items-center gap-1.5">
+              <Layers size={14} className="text-[#94A3B8]" /> {course.level}
+            </span>
+          )}
+        </div>
+
+        {/* Price block — consistent position across all cards */}
+        <div className={`mt-5 rounded-2xl bg-[#F8FAFC] px-4 py-4 ring-1 ${tint.ring}`}>
+          <div className="flex items-end gap-2.5">
+            <span className="text-[30px] font-extrabold leading-none tracking-tight text-[#101828]">
               ₹{course.price.toLocaleString('en-IN')}
             </span>
             {course.originalPrice && course.originalPrice > course.price && (
-              <span className="text-xl text-neutral-500 line-through mb-2">
+              <span className="pb-0.5 text-[15px] text-[#94A3B8] line-through">
                 ₹{course.originalPrice.toLocaleString('en-IN')}
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3">
-            <p className="text-neutral-500 text-xs">One-time · Instant access · No subscription</p>
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <p className="text-[12px] text-[#64748B]">One-time · Instant access</p>
             {savings && savings > 0 && (
-              <span className="ml-auto text-xs font-bold text-green-400 bg-green-400/10 border border-green-400/20 px-2 py-0.5 rounded-full whitespace-nowrap">
+              <span className="whitespace-nowrap rounded-full bg-[#E7F8EF] px-2 py-0.5 text-[11px] font-bold text-[#1F9D55]">
                 Save ₹{savings.toLocaleString('en-IN')}
               </span>
             )}
           </div>
         </div>
 
-        {/* ── CTA BUTTON (before features — critical for mobile) ── */}
+        {/* CTA */}
         <button
           onClick={onEnroll}
-          className={`group/btn w-full font-extrabold text-base py-4 rounded-2xl transition-all duration-200 mb-3 flex items-center justify-center gap-2 ${
+          className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-[15px] font-semibold transition-colors ${
             isEnrolled
-              ? 'bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20'
-              : 'bg-amber-400 hover:bg-amber-300 active:scale-[0.98] text-black shadow-[0_4px_20px_rgba(251,191,36,0.3)] hover:shadow-[0_6px_28px_rgba(251,191,36,0.45)]'
+              ? 'bg-[#E7F8EF] text-[#1F9D55] hover:bg-[#D7F3E3]'
+              : `${tint.btn} text-white`
           }`}
         >
           {isEnrolled ? (
             <>
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-              </svg>
-              <span>Already Enrolled · Go to Dashboard</span>
+              <CheckCircle2 size={16} /> Enrolled · Go to Dashboard
             </>
           ) : (
             <>
-              <span>Enroll Now</span>
-              <svg className="w-4 h-4 transition-transform duration-200 group-hover/btn:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-              </svg>
+              Enroll Now <ArrowRight size={16} className="transition-transform duration-200 group-hover:translate-x-0.5" />
             </>
           )}
         </button>
 
         {/* Trust row */}
-        <div className="flex items-center justify-center gap-1.5 text-neutral-600 text-xs mb-6">
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd"/>
-          </svg>
-          Secured by Razorpay · 100% Safe Checkout
-        </div>
+        <p className="mt-3 flex items-center justify-center gap-1.5 text-[11.5px] text-[#94A3B8]">
+          <ShieldCheck size={13} /> Secured by Razorpay
+        </p>
 
-        {/* Divider */}
-        <div className="h-px bg-white/[0.07] mb-6" />
+        <div className="mt-5 h-px bg-[#E8EDF4]" />
 
-        {/* ── FEATURES ── */}
-        <FeatureList features={features} />
+        {/* Features — this is the only zone that's allowed to vary card height */}
+        {features.length > 0 && (
+          <ul className="mt-5 space-y-2.5">
+            {visibleFeatures.map((item, i) => (
+              <li key={`${i}-${item.slice(0, 20)}`} className="flex items-start gap-2.5 text-[13.5px] leading-snug text-[#475569]">
+                <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-[#1F9D55]" />
+                <span className="min-w-0 flex-1 text-left">{item}</span>
+              </li>
+            ))}
+            {!showAll && overflow > 0 && (
+              <li>
+                <button
+                  onClick={() => setShowAll(true)}
+                  className="pl-[26px] text-[12.5px] font-semibold text-[#3267f5] hover:text-[#1d4ed8]"
+                >
+                  +{overflow} more included
+                </button>
+              </li>
+            )}
+            {showAll && features.length > SHOW && (
+              <li>
+                <button
+                  onClick={() => setShowAll(false)}
+                  className="pl-[26px] text-[12.5px] font-semibold text-[#94A3B8] hover:text-[#64748B]"
+                >
+                  Show less
+                </button>
+              </li>
+            )}
+          </ul>
+        )}
 
-        {/* Course meta footer */}
+        {/* Faculty footer */}
         {course.instructor && (
-          <div className="mt-6 pt-5 border-t border-white/[0.06] text-center">
-            <div className="text-[10px] text-neutral-500 uppercase tracking-widest mb-1.5">Faculty</div>
-            <div className="text-white text-base font-extrabold tracking-wide">{course.instructor}</div>
+          <div className="mt-5 flex items-center gap-2 border-t border-[#E8EDF4] pt-4 text-[13px] text-[#64748B]">
+            <GraduationCap size={15} className="text-[#94A3B8]" />
+            <span className="font-semibold text-[#101828]">{course.instructor}</span>
           </div>
         )}
       </div>
     </div>
-  );
-};
-
-/* ── Expandable feature list ───────────────────────────────── */
-const FeatureList: React.FC<{ features: string[] }> = ({ features }) => {
-  const [showAll, setShowAll] = React.useState(false);
-  const SHOW = 6;
-  const visible = showAll ? features : features.slice(0, SHOW);
-  const overflow = features.length - SHOW;
-  return (
-    <ul className="space-y-3">
-      {visible.map((item: string) => (
-        <li key={item} className="flex items-start gap-3 text-neutral-300 text-sm leading-snug">
-          <span className="w-4 h-4 flex-shrink-0 mt-0.5 rounded-full bg-amber-400/15 flex items-center justify-center">
-            <svg className="w-2.5 h-2.5 text-amber-400" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
-          </span>
-          {item}
-        </li>
-      ))}
-      {!showAll && overflow > 0 && (
-        <li>
-          <button
-            onClick={() => setShowAll(true)}
-            className="flex items-center gap-1.5 text-amber-400 hover:text-amber-300 text-xs font-semibold pl-7 transition-colors"
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-            </svg>
-            +{overflow} more included
-          </button>
-        </li>
-      )}
-      {showAll && (
-        <li>
-          <button
-            onClick={() => setShowAll(false)}
-            className="flex items-center gap-1.5 text-neutral-500 hover:text-neutral-400 text-xs font-semibold pl-7 transition-colors"
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-            </svg>
-            Show less
-          </button>
-        </li>
-      )}
-    </ul>
   );
 };
 

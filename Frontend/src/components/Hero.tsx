@@ -100,7 +100,7 @@ const Hero: React.FC<HeroProps> = ({ className }) => {
           className="text-white/80 max-w-2xl mx-auto mb-10 leading-relaxed"
           style={{ fontSize: 'clamp(1rem, 2.2vw, 1.2rem)', fontFamily: "'DM Sans','Inter',sans-serif" }}
         >
-          Heystudent is powered by CUET rankers and DU students from SRCC, Hindu &amp; Hansraj.
+          HeyStudent is powered by CUET rankers and DU students from SRCC, Hindu &amp; Hansraj.
           Your preparation deserves more than random YouTube videos and outdated notes.
         </p>
 

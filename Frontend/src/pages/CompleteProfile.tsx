@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { useAuth } from '../context/AuthContext';
 import SharedNavbar from '../components/SharedNavbar';
 import { authApi } from '../services/api';
@@ -216,6 +217,9 @@ const ProfilePage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#fff9ed] flex flex-col">
+      <Helmet>
+        <meta name="robots" content="noindex, nofollow" />
+      </Helmet>
       <SharedNavbar />
       <div className="flex-grow flex flex-col items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg space-y-8 border border-[#ffe8b5]">

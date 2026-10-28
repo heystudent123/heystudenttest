@@ -1,7 +1,28 @@
 const Course = require('../models/Course');
+const Enrollment = require('../models/Enrollment');
 const ErrorResponse = require('../utils/errorResponse');
 const { deleteFile } = require('../utils/courseUpload');
 const path = require('path');
+
+// Full material detail for an enrolled student — unlike sanitizeMaterialForPublic,
+// this includes everything needed to actually consume the material (note content,
+// video/external links, ordering, description). File materials still resolve to a
+// signed URL on demand via GET /api/materials/:materialId, never a stored one.
+const sanitizeMaterialForStudent = (material) => ({
+  _id: material._id,
+  title: material.title,
+  description: material.description || '',
+  materialType: material.materialType,
+  fileType: material.fileType,
+  fileExtension: material.fileExtension,
+  hasFile: Boolean(material.cloudinaryPublicId),
+  videoUrl: material.videoUrl,
+  videoPlatform: material.videoPlatform,
+  externalUrl: material.externalUrl,
+  noteContent: material.noteContent,
+  order: material.order || 0,
+  uploadedAt: material.uploadedAt,
+});
 
 const sanitizeMaterialForPublic = (material) => ({
   _id: material._id,
@@ -115,6 +136,75 @@ exports.getCourseById = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: sanitizeCourseForPublic(course)
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get full materials for a course the signed-in user is enrolled in
+// @route   GET /api/courses/:id/my-materials
+// @access  Private (enrolled students only)
+exports.getMyMaterials = async (req, res, next) => {
+  try {
+    const course = await Course.findById(req.params.id).select('_id title materials').lean();
+    if (!course) {
+      return next(new ErrorResponse(`Course not found with id of ${req.params.id}`, 404));
+    }
+
+    const inferredCourseSlug = String(course.title || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    const enrollment = await Enrollment.findOne({
+      userId: req.user._id,
+      isActive: true,
+      $or: [
+        { courseId: course._id },
+        ...(inferredCourseSlug ? [{ courseSlug: inferredCourseSlug }] : []),
+      ],
+    }).select('_id');
+
+    if (!enrollment) {
+      return next(new ErrorResponse('You are not enrolled in this course', 403));
+    }
+
+    const materials = (course.materials || [])
+      .slice()
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map(sanitizeMaterialForStudent);
+
+    res.status(200).json({
+      success: true,
+      count: materials.length,
+      data: materials,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Get full materials for a course (admin — no enrollment required)
+// @route   GET /api/courses/:id/admin-materials
+// @access  Private/Admin
+exports.getAdminMaterials = async (req, res, next) => {
+  try {
+    const course = await Course.findById(req.params.id).select('_id title materials').lean();
+    if (!course) {
+      return next(new ErrorResponse(`Course not found with id of ${req.params.id}`, 404));
+    }
+
+    const materials = (course.materials || [])
+      .slice()
+      .sort((a, b) => (a.order || 0) - (b.order || 0))
+      .map(sanitizeMaterialForStudent);
+
+    res.status(200).json({
+      success: true,
+      count: materials.length,
+      data: materials,
     });
   } catch (err) {
     next(err);
@@ -264,6 +354,7 @@ exports.uploadCourseMaterial = async (req, res, next) => {
       fileType: fileType,
       fileExtension,
       cloudinaryPublicId: req.file.filename,
+      cloudinaryDelivery: 'authenticated',
       order: req.body.order || course.materials.length
     };
     

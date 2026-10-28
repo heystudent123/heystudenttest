@@ -1,3 +1,11 @@
 # https://www.robotstxt.org/robotstxt.html
 User-agent: *
-Disallow:
+Disallow: /admin
+Disallow: /student
+Disallow: /institute
+Disallow: /mock-tests/attempt
+Disallow: /mock-tests/result
+Disallow: /profile
+Disallow: /user-profile
+
+Sitemap: https://heystudent.in/sitemap.xml

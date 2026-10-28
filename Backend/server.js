@@ -21,12 +21,16 @@ const courseRoutes = require('./routes/courseRoutes');
 const referralRoutes = require('./routes/referralRoutes');
 const validationRoutes = require('./routes/validationRoutes');
 const serverRoutes = require('./routes/serverRoutes');
-const videoRoutes = require('./routes/videoRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const enrollmentRoutes = require('./routes/enrollmentRoutes');
 const postRoutes = require('./routes/postRoutes');
 const materialRoutes = require('./routes/materialRoutes');
 const cuetPredictorRoutes = require('./routes/cuetPredictorRoutes');
+const questionRoutes = require('./routes/questionRoutes');
+const mockTestRoutes = require('./routes/mockTestRoutes');
+const attemptRoutes = require('./routes/attemptRoutes');
+const planRoutes = require('./routes/planRoutes');
+const contactRoutes = require('./routes/contactRoutes');
 
 // Initialize Express app
 const app = express();
@@ -94,12 +98,16 @@ app.use('/api/courses', courseRoutes);
 app.use('/api/referrals', referralRoutes);
 app.use('/api/validation', validationRoutes);
 app.use('/api/server', serverRoutes);
-app.use('/api/videos', videoRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/enrollments', enrollmentRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/materials', materialRoutes);
 app.use('/api/cuet-predictor', cuetPredictorRoutes);
+app.use('/api/questions', questionRoutes);
+app.use('/api/mock-tests', mockTestRoutes);
+app.use('/api/attempts', attemptRoutes);
+app.use('/api/plans', planRoutes);
+app.use('/api/contact', contactRoutes);
 
 // Root route
 app.get('/', (req, res) => {
@@ -132,6 +140,9 @@ app.get('/ping', (req, res) => {
   console.log(`[PING] ${new Date().toISOString()} - Ping received from ${ip}`);
   res.sendStatus(200);
 });
+
+const errorHandler = require('./middleware/error');
+app.use(errorHandler);
 
 // Port
 const PORT = process.env.PORT || 5000;

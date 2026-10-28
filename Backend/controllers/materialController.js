@@ -1,11 +1,22 @@
 const Course = require('../models/Course');
 const Enrollment = require('../models/Enrollment');
 const ErrorResponse = require('../utils/errorResponse');
-const { cloudinary } = require('../utils/courseUpload');
+const { pipeSignedAsset } = require('../utils/signedAsset');
 
-const SIGNED_URL_TTL_SECONDS = 60;
+const resourceTypeFor = (material) => {
+  if (material.fileType === 'image') return 'image';
+  if (material.fileType === 'video') return 'video';
+  return 'raw';
+};
 
-// @desc    Resolve a protected material and redirect to a short-lived signed URL
+const formatFor = (material) => {
+  const ext = String(material.fileExtension || '').replace(/^\./, '').toLowerCase();
+  const publicId = String(material.cloudinaryPublicId || '').toLowerCase();
+  if (!ext || publicId.endsWith(`.${ext}`)) return undefined;
+  return ext;
+};
+
+// @desc    Stream a course file for an enrolled student
 // @route   GET /api/materials/:materialId
 // @access  Private (enrolled students only)
 exports.getProtectedMaterial = async (req, res, next) => {
@@ -20,7 +31,7 @@ exports.getProtectedMaterial = async (req, res, next) => {
       return next(new ErrorResponse('Material not found', 404));
     }
 
-    const material = (course.materials || []).find((m) => String(m._id) === materialId);
+    const material = (course.materials || []).find((item) => String(item._id) === materialId);
     if (!material) {
       return next(new ErrorResponse('Material not found', 404));
     }
@@ -35,43 +46,30 @@ exports.getProtectedMaterial = async (req, res, next) => {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
 
-    const enrollmentFilter = {
+    const enrollment = await Enrollment.findOne({
       userId: req.user._id,
       isActive: true,
-      $or: [{ courseId: course._id }],
-    };
+      $or: [
+        { courseId: course._id },
+        ...(inferredCourseSlug ? [{ courseSlug: inferredCourseSlug }] : []),
+      ],
+    }).select('_id');
 
-    if (inferredCourseSlug) {
-      enrollmentFilter.$or.push({ courseSlug: inferredCourseSlug });
-    }
-
-    const enrollment = await Enrollment.findOne(enrollmentFilter).select('_id');
-
-    if (!enrollment) {
+    if (!enrollment && req.user.role !== 'admin') {
       return next(new ErrorResponse('You are not enrolled in this course', 403));
     }
 
-    const expiresAt = Math.floor(Date.now() / 1000) + SIGNED_URL_TTL_SECONDS;
+    const opened = await pipeSignedAsset(res, {
+      publicId: material.cloudinaryPublicId,
+      resourceType: resourceTypeFor(material),
+      deliveryType: material.cloudinaryDelivery || 'private',
+      format: formatFor(material),
+    }, material.title || 'file');
 
-    const resourceType = material.fileType === 'image'
-      ? 'image'
-      : material.fileType === 'video'
-        ? 'video'
-        : 'raw';
-
-    // Signed delivery URL (short-lived) to prevent static URL sharing.
-    const signedUrl = cloudinary.url(material.cloudinaryPublicId, {
-      resource_type: resourceType,
-      type: 'private',
-      secure: true,
-      sign_url: true,
-      expires_at: expiresAt,
-      format: material.fileExtension || undefined,
-    });
-
-    res.set('Cache-Control', 'no-store');
-    return res.redirect(302, signedUrl);
+    if (!opened && !res.headersSent) {
+      return next(new ErrorResponse('This file could not be opened', 404));
+    }
   } catch (err) {
-    return next(err);
+    if (!res.headersSent) return next(err);
   }
 };
