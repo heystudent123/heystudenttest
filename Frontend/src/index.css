@@ -245,15 +245,55 @@ html, body {
   .hero-visual-slot { width: 624px; height: 384px; }
   .hero-visual { transform: scale(0.65); }
 }
+/* Below lg the absolutely-positioned collage is replaced by a simple centred
+   stack that always fits the viewport (the scaled collage was wider than phones). */
 @media (max-width: 1023px) {
   .hero-visual-slot {
-    width: 432px;
-    height: 266px;
+    width: 100%;
+    height: auto;
     margin: 0 auto;
   }
   .hero-visual {
-    transform: scale(0.45);
-    transform-origin: top left;
+    width: 100%;
+    height: auto;
+    transform: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+  .hero-visual .hero-portrait {
+    position: static;
+    order: 1;
+    width: auto;
+    max-width: 100%;
+    height: 340px;
+  }
+  .hero-visual .hero-script {
+    position: static;
+    order: 2;
+    width: auto;
+    font-size: 28px;
+  }
+  .hero-visual .hero-feature-card {
+    position: static;
+    order: 3;
+    width: 100%;
+    max-width: 320px;
+    height: auto;
+  }
+}
+
+/* Centre copy on small screens; sections opt in with .hs-center-mobile. */
+@media (max-width: 1023px) {
+  .hs-page .hs-center-mobile,
+  .hs-page .hs-center-mobile .why-title,
+  .hs-page .hs-center-mobile p {
+    text-align: center;
+  }
+  .hs-page .hs-center-mobile p {
+    margin-left: auto;
+    margin-right: auto;
   }
 }
 

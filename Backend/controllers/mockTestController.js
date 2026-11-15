@@ -13,6 +13,7 @@ const STRUCTURAL_FIELDS = [
   'durationMinutes',
   'shuffleQuestions',
   'shuffleOptions',
+  'saleType',
   'isFree',
   'price',
 ];
@@ -27,6 +28,7 @@ function applyDraft(test, value) {
   test.positiveMarks = value.positiveMarks;
   test.negativeMarks = value.negativeMarks;
   test.maxMarks = value.maxMarks;
+  test.saleType = value.saleType;
   test.isFree = value.isFree;
   test.price = value.price;
   test.courseId = value.courseId;
@@ -149,7 +151,7 @@ exports.updateTest = async (req, res, next) => {
     if (!test) return next(new ErrorResponse('Test not found.', 404));
 
     if (test.status === 'published' && STRUCTURAL_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(req.body, field))) {
-      return next(new ErrorResponse('Unpublish the test before changing questions, marks, duration, shuffling, or price. The published snapshot stays in place for attempts already using it.', 409));
+      return next(new ErrorResponse('Unpublish the test before changing questions, marks, duration, or price. The published snapshot stays in place for attempts already using it.', 409));
     }
 
     const merged = {
@@ -166,6 +168,7 @@ exports.updateTest = async (req, res, next) => {
       questionBankId: req.body.questionBankId === undefined
         ? (test.questionBankId ? String(test.questionBankId) : '')
         : req.body.questionBankId,
+      saleType: req.body.saleType ?? test.saleType,
       isFree: req.body.isFree ?? test.isFree,
       price: req.body.price ?? test.price,
       courseId: req.body.courseId === undefined ? (test.courseId ? String(test.courseId) : '') : req.body.courseId,

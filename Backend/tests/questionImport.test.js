@@ -110,7 +110,7 @@ test('non-spreadsheet bytes are rejected', () => {
   assert.match(parsed.fatal, /not an Excel workbook/);
 });
 
-test('publishing requires questions, instructions, and a paid price', () => {
+test('publishing requires questions and a paid price', () => {
   const id = '64b7f3a2c1d4e5f678901234';
   const missing = validateMockTest({
     title: 'English PYQ',
@@ -118,12 +118,10 @@ test('publishing requires questions, instructions, and a paid price', () => {
     positiveMarks: 5,
     negativeMarks: 1,
     questionIds: [],
-    instructions: '',
-    isFree: false,
+    saleType: 'paid',
     price: 0,
   }, { publishing: true });
   assert.ok(missing.errors.some((error) => /at least one question/i.test(error)));
-  assert.ok(missing.errors.some((error) => /instructions/i.test(error)));
   assert.ok(missing.errors.some((error) => /price/i.test(error)));
 
   const ready = validateMockTest({
@@ -132,13 +130,26 @@ test('publishing requires questions, instructions, and a paid price', () => {
     positiveMarks: 5,
     negativeMarks: 1,
     questionIds: [id, id],
-    instructions: 'Read each passage carefully.',
-    isFree: true,
+    saleType: 'free',
   }, { publishing: true });
   assert.deepEqual(ready.errors, []);
   assert.equal(ready.value.questionIds.length, 1);
   assert.equal(ready.value.maxMarks, 5);
   assert.equal(ready.value.price, 0);
+  assert.equal(ready.value.saleType, 'free');
+
+  const bundle = validateMockTest({
+    title: 'English Bundle Paper',
+    durationMinutes: 60,
+    positiveMarks: 5,
+    negativeMarks: 1,
+    questionIds: [id],
+    saleType: 'bundle',
+  }, { publishing: true });
+  assert.deepEqual(bundle.errors, []);
+  assert.equal(bundle.value.saleType, 'bundle');
+  assert.equal(bundle.value.price, 0);
+  assert.equal(bundle.value.isFree, false);
 });
 
 test('duration and marks outside the allowed range are rejected', () => {

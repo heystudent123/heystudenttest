@@ -31,8 +31,14 @@ function subjectClause(subject) {
   };
 }
 
+function saleTypeOf(test) {
+  if (test.saleType === 'free' || test.saleType === 'paid' || test.saleType === 'bundle') return test.saleType;
+  return test.isFree ? 'free' : 'paid';
+}
+
 function toCatalogCard(test, access = {}) {
-  const isFree = Boolean(test.isFree);
+  const saleType = saleTypeOf(test);
+  const isFree = saleType === 'free';
   return {
     _id: test._id,
     title: test.title,
@@ -43,8 +49,9 @@ function toCatalogCard(test, access = {}) {
     questionCount: typeof test.questionCount === 'number'
       ? test.questionCount
       : (Array.isArray(test.publishedSnapshot) ? test.publishedSnapshot.length : 0),
+    saleType,
     isFree,
-    price: isFree ? 0 : Number(test.price) || 0,
+    price: saleType === 'paid' ? Number(test.price) || 0 : 0,
     attemptLimit: test.attemptLimit,
     hasAccess: Boolean(access.hasAccess),
     attemptsUsed: access.attemptsUsed || 0,
@@ -58,5 +65,6 @@ module.exports = {
   subjectLabel,
   availabilityClauses,
   subjectClause,
+  saleTypeOf,
   toCatalogCard,
 };

@@ -30,6 +30,7 @@ const questionRoutes = require('./routes/questionRoutes');
 const mockTestRoutes = require('./routes/mockTestRoutes');
 const attemptRoutes = require('./routes/attemptRoutes');
 const planRoutes = require('./routes/planRoutes');
+const bundleRoutes = require('./routes/bundleRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 
 // Initialize Express app
@@ -66,6 +67,11 @@ app.use(cors({
 
 app.use(clerkMiddleware());   // must be before any routes that use getAuth()
 
+// ── Razorpay webhook needs the untouched raw bytes (the HMAC is computed over them).
+// This must run BEFORE express.json, otherwise the body is already parsed and the
+// signature can never be verified.
+app.use('/api/payments/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
+
 // ── Body parsing — cap at 5 MB to prevent payload attacks ────────────────────
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
@@ -75,6 +81,10 @@ app.use('/api', globalLimiter);
 
 // Set JWT Secret if not in env
 if (!process.env.JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    // The fallback below is public (it is in the repo). Anyone could forge an admin token with it.
+    console.error('SECURITY WARNING: JWT_SECRET is not set in production. Set a long random value immediately.');
+  }
   process.env.JWT_SECRET = 'heystudentsdu-secret-key-dev';
   process.env.JWT_EXPIRE = '30d';
 }
@@ -107,6 +117,7 @@ app.use('/api/questions', questionRoutes);
 app.use('/api/mock-tests', mockTestRoutes);
 app.use('/api/attempts', attemptRoutes);
 app.use('/api/plans', planRoutes);
+app.use('/api/bundles', bundleRoutes);
 app.use('/api/contact', contactRoutes);
 
 // Root route

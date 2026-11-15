@@ -518,15 +518,13 @@ const AdminQuestionBankPage: React.FC = () => {
               <h2 className="text-[17px] font-extrabold text-[#101828]">Delete this bank?</h2>
               <p className="mt-1.5 text-[13px] text-[#64748B]">
                 <span className="font-semibold text-[#101828]">{confirmDeleteBank.title}</span>
-                {confirmDeleteBank.questionCount > 0
-                  ? ` has ${confirmDeleteBank.questionCount} question(s). Remove them first before deleting the bank.`
-                  : ' will be permanently removed.'}
+                {' '}and every question inside it will be permanently removed.
               </p>
               <div className="mt-5 flex gap-2">
                 <button onClick={() => setConfirmDeleteBank(null)} className="flex-1 rounded-lg border border-[#D0D5DD] py-2.5 text-[13.5px] font-semibold text-[#344054] hover:bg-[#F7F9FC]">Cancel</button>
                 <button
                   onClick={onDeleteBank}
-                  disabled={deletingBank || confirmDeleteBank.questionCount > 0}
+                  disabled={deletingBank}
                   className="flex-1 rounded-lg bg-[#DC2626] py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#B91C1C] disabled:opacity-50"
                 >
                   {deletingBank ? 'Deleting…' : 'Delete'}

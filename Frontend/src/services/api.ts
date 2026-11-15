@@ -905,6 +905,29 @@ export const mockTestsApi = {
   },
 };
 
+export const bundlesApi = {
+  list: async () => {
+    const response = await api.get('/bundles');
+    return response.data;
+  },
+  get: async (id: string) => {
+    const response = await api.get(`/bundles/${id}`);
+    return response.data;
+  },
+  create: async (data: { title: string; description: string; mockTestIds: string[] }) => {
+    const response = await api.post('/bundles', data);
+    return response.data;
+  },
+  update: async (id: string, data: { title: string; description: string; mockTestIds: string[] }) => {
+    const response = await api.put(`/bundles/${id}`, data);
+    return response.data;
+  },
+  remove: async (id: string) => {
+    const response = await api.delete(`/bundles/${id}`);
+    return response.data;
+  },
+};
+
 export const plansApi = {
   list: async () => {
     const response = await api.get('/plans');
@@ -914,11 +937,11 @@ export const plansApi = {
     const response = await api.get('/plans/public');
     return response.data;
   },
-  create: async (data: { title: string; description: string; price: number; mockTestIds: string[]; courseIds: string[] }) => {
+  create: async (data: { title: string; description: string; price: number; bundleIds: string[]; courseIds: string[]; mockTestIds?: string[] }) => {
     const response = await api.post('/plans', data);
     return response.data;
   },
-  update: async (id: string, data: { title: string; description: string; price: number; mockTestIds: string[]; courseIds: string[] }) => {
+  update: async (id: string, data: { title: string; description: string; price: number; bundleIds: string[]; courseIds: string[]; mockTestIds?: string[] }) => {
     const response = await api.put(`/plans/${id}`, data);
     return response.data;
   },

@@ -3,12 +3,25 @@ const TestAttempt = require('../models/TestAttempt');
 const Payment = require('../models/Payment');
 const Enrollment = require('../models/Enrollment');
 const Plan = require('../models/Plan');
+const Bundle = require('../models/Bundle');
 const Question = require('../models/Question');
 const ErrorResponse = require('../utils/errorResponse');
 const { isObjectId } = require('../middleware/validate');
 const { scoreAttempt } = require('../utils/scoreAttempt');
-const { availabilityClauses, subjectLabel, toCatalogCard } = require('../utils/mockTestCatalog');
-const { shuffleSnapshot } = require('../utils/shuffleAttempt');
+const { availabilityClauses, subjectLabel, saleTypeOf, toCatalogCard } = require('../utils/mockTestCatalog');
+function cloneSnapshot(publishedSnapshot) {
+  return (publishedSnapshot || []).map((question, index) => ({
+    questionId: question.questionId,
+    order: index + 1,
+    question: question.question,
+    optionA: question.optionA,
+    optionB: question.optionB,
+    optionC: question.optionC,
+    optionD: question.optionD,
+    correctAnswer: question.correctAnswer,
+    chapter: question.chapter || '',
+  }));
+}
 
 function missingProfile(user) {
   const missing = [];
@@ -109,6 +122,22 @@ async function finalizeAttempt(attempt, requestedReason) {
   return updated || TestAttempt.findById(attempt._id);
 }
 
+async function testIdsFromPlans(plans) {
+  const ids = new Set();
+  const bundleIds = [];
+  plans.forEach((plan) => {
+    (plan.mockTestIds || []).forEach((id) => ids.add(String(id)));
+    (plan.bundleIds || []).forEach((id) => bundleIds.push(id));
+  });
+  if (bundleIds.length) {
+    const bundles = await Bundle.find({ _id: { $in: bundleIds } }).select('mockTestIds').lean();
+    bundles.forEach((bundle) => {
+      (bundle.mockTestIds || []).forEach((id) => ids.add(String(id)));
+    });
+  }
+  return ids;
+}
+
 async function ownedPlanTestIds(user) {
   if (!user) return new Set();
   const payments = await Payment.find({
@@ -118,24 +147,32 @@ async function ownedPlanTestIds(user) {
   }).select('purposeId').lean();
   const planIds = payments.map((payment) => payment.purposeId).filter(Boolean);
   if (!planIds.length) return new Set();
-  const plans = await Plan.find({ _id: { $in: planIds } }).select('mockTestIds').lean();
-  const ids = new Set();
-  plans.forEach((plan) => {
-    (plan.mockTestIds || []).forEach((id) => ids.add(String(id)));
-  });
-  return ids;
+  const plans = await Plan.find({ _id: { $in: planIds } }).select('mockTestIds bundleIds').lean();
+  return testIdsFromPlans(plans);
+}
+
+async function ownedPlanIds(user) {
+  if (!user) return new Set();
+  const payments = await Payment.find({
+    userId: user._id,
+    status: 'paid',
+    purpose: 'plan',
+  }).select('purposeId').lean();
+  return new Set(payments.map((payment) => String(payment.purposeId)).filter(Boolean));
 }
 
 async function userCanAccess(user, test) {
-  if (test.isFree) return true;
+  if (saleTypeOf(test) === 'free' || test.isFree) return true;
   if (!user) return false;
-  const paid = await Payment.exists({
-    userId: user._id,
-    status: 'paid',
-    purpose: 'mock_test',
-    purposeId: test._id,
-  });
-  if (paid) return true;
+  if (saleTypeOf(test) !== 'bundle') {
+    const paid = await Payment.exists({
+      userId: user._id,
+      status: 'paid',
+      purpose: 'mock_test',
+      purposeId: test._id,
+    });
+    if (paid) return true;
+  }
   const fromPlans = await ownedPlanTestIds(user);
   if (fromPlans.has(String(test._id))) return true;
   if (!test.courseId) return false;
@@ -157,7 +194,7 @@ async function accessByTest(user, tests) {
   const paidIds = new Set();
   const courseIds = new Set();
   if (user) {
-    const paidTests = tests.filter((test) => !test.isFree);
+    const paidTests = tests.filter((test) => saleTypeOf(test) === 'paid');
     if (paidTests.length) {
       const payments = await Payment.find({
         userId: user._id,
@@ -183,8 +220,9 @@ async function accessByTest(user, tests) {
     const mine = attempts.filter((attempt) => String(attempt.mockTestId) === String(test._id));
     const inProgress = mine.find((attempt) => attempt.status === 'in_progress' || attempt.status === 'paused');
     const finished = mine.filter((attempt) => attempt.status !== 'in_progress' && attempt.status !== 'paused').length;
-    const hasAccess = Boolean(test.isFree)
-      || paidIds.has(String(test._id))
+    const type = saleTypeOf(test);
+    const hasAccess = type === 'free'
+      || (type === 'paid' && paidIds.has(String(test._id)))
       || planTestIds.has(String(test._id))
       || (test.courseId && courseIds.has(String(test.courseId)));
     map.set(String(test._id), {
@@ -243,7 +281,7 @@ exports.listCatalog = async (req, res, next) => {
     const subject = String(req.query.subject || '').trim();
     const q = String(req.query.q || '').trim().toLowerCase();
 
-    const [allTests, publishedPlans] = await Promise.all([
+    const [allTests, publishedPlans, allBundles, boughtPlanIds] = await Promise.all([
       MockTest.aggregate([
         { $match: filter },
         {
@@ -254,6 +292,7 @@ exports.listCatalog = async (req, res, next) => {
             chapter: 1,
             durationMinutes: 1,
             maxMarks: 1,
+            saleType: 1,
             isFree: 1,
             price: 1,
             courseId: 1,
@@ -263,26 +302,50 @@ exports.listCatalog = async (req, res, next) => {
           },
         },
       ]),
-      Plan.find({ status: 'published' }).select('title price mockTestIds courseIds').lean(),
+      Plan.find({ status: 'published' }).select('title description price mockTestIds bundleIds courseIds').lean(),
+      Bundle.find().select('title description mockTestIds').lean(),
+      ownedPlanIds(req.user),
     ]);
     const access = await accessByTest(req.user, allTests);
-    const offersFor = (testId) => publishedPlans
-      .filter((plan) => (plan.mockTestIds || []).some((id) => String(id) === String(testId)))
-      .map((plan) => ({
+    const bundleById = new Map(allBundles.map((bundle) => [String(bundle._id), bundle]));
+    const summarizePlan = (plan) => {
+      let testCount = (plan.mockTestIds || []).length;
+      (plan.bundleIds || []).forEach((bundleId) => {
+        const bundle = bundleById.get(String(bundleId));
+        if (bundle) testCount += (bundle.mockTestIds || []).length;
+      });
+      return {
         _id: plan._id,
         title: plan.title,
         price: plan.price,
-        testCount: (plan.mockTestIds || []).length,
+        testCount,
         courseCount: (plan.courseIds || []).length,
-      }));
-    const progress = { total: allTests.length, unlocked: 0, attempted: 0 };
+      };
+    };
+    const offersFor = (testId) => publishedPlans
+      .filter((plan) => {
+        if ((plan.mockTestIds || []).some((id) => String(id) === String(testId))) return true;
+        return (plan.bundleIds || []).some((bundleId) => {
+          const bundle = bundleById.get(String(bundleId));
+          return bundle && (bundle.mockTestIds || []).some((id) => String(id) === String(testId));
+        });
+      })
+      .map(summarizePlan);
+    const progress = { total: 0, unlocked: 0, attempted: 0 };
     allTests.forEach((test) => {
       const entry = access.get(String(test._id));
       if (entry) entry.offers = offersFor(test._id);
+      const type = saleTypeOf(test);
+      // Locked bundle tests are sold only via plans — not counted as standalone catalog items.
+      if (type === 'bundle' && !(entry && entry.hasAccess)) return;
+      progress.total += 1;
       if (entry && entry.hasAccess) progress.unlocked += 1;
       if (entry && (entry.attemptsUsed > 0 || entry.inProgressAttemptId)) progress.attempted += 1;
     });
     const tests = allTests.filter((test) => {
+      const type = saleTypeOf(test);
+      const entry = access.get(String(test._id));
+      if (type === 'bundle' && !(entry && entry.hasAccess)) return false;
       if (subject && subject.toLowerCase() !== 'all' && subjectLabel(test).toLowerCase() !== subject.toLowerCase()) return false;
       if (!q) return true;
       return [test.title, test.chapter, test.category].some((value) => String(value || '').toLowerCase().includes(q));
@@ -290,11 +353,61 @@ exports.listCatalog = async (req, res, next) => {
     tests.sort((left, right) => {
       const leftAccess = access.get(String(left._id));
       const rightAccess = access.get(String(right._id));
-      const leftRank = (leftAccess && leftAccess.hasAccess ? 2 : 0) + (left.isFree ? 1 : 0);
-      const rightRank = (rightAccess && rightAccess.hasAccess ? 2 : 0) + (right.isFree ? 1 : 0);
+      const leftRank = (leftAccess && leftAccess.hasAccess ? 2 : 0) + (saleTypeOf(left) === 'free' ? 1 : 0);
+      const rightRank = (rightAccess && rightAccess.hasAccess ? 2 : 0) + (saleTypeOf(right) === 'free' ? 1 : 0);
       if (leftRank !== rightRank) return rightRank - leftRank;
       return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
     });
+
+    const planCards = publishedPlans
+      .filter((plan) => (plan.bundleIds || []).length > 0)
+      .map((plan) => {
+        const bundles = (plan.bundleIds || [])
+          .map((id) => bundleById.get(String(id)))
+          .filter(Boolean)
+          .map((bundle) => ({
+            _id: bundle._id,
+            title: bundle.title,
+            description: bundle.description || '',
+            mockTests: (bundle.mockTestIds || []).map((testId) => {
+              const test = allTests.find((row) => String(row._id) === String(testId));
+              if (!test) return null;
+              return {
+                _id: test._id,
+                title: test.title,
+                subject: subjectLabel(test),
+                durationMinutes: test.durationMinutes,
+                questionCount: test.questionCount,
+              };
+            }).filter(Boolean),
+          }));
+        const testCount = bundles.reduce((sum, bundle) => sum + bundle.mockTests.length, 0);
+        return {
+          _id: plan._id,
+          title: plan.title,
+          description: plan.description || '',
+          price: plan.price,
+          hasAccess: boughtPlanIds.has(String(plan._id)),
+          testCount,
+          courseCount: (plan.courseIds || []).length,
+          bundles,
+        };
+      })
+      .filter((plan) => {
+        if (!plan.bundles.length) return false;
+        if (subject && subject.toLowerCase() !== 'all') {
+          const match = plan.bundles.some((bundle) => bundle.mockTests.some((test) => test.subject.toLowerCase() === subject.toLowerCase()));
+          if (!match) return false;
+        }
+        if (q) {
+          const hay = [plan.title, plan.description, ...plan.bundles.flatMap((bundle) => [bundle.title, ...bundle.mockTests.map((test) => test.title)])]
+            .join(' ')
+            .toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
     const total = tests.length;
     const pageTests = tests.slice((page - 1) * limit, page * limit);
     res.status(200).json({
@@ -305,6 +418,7 @@ exports.listCatalog = async (req, res, next) => {
       pages: Math.max(1, Math.ceil(total / limit)),
       total,
       count: pageTests.length,
+      plans: planCards,
       data: pageTests.map((test) => toCatalogCard(test, access.get(String(test._id)))),
     });
   } catch (err) {
@@ -445,7 +559,7 @@ exports.startAttempt = async (req, res, next) => {
 
     const attemptNumber = await TestAttempt.countDocuments({ userId: req.user._id, mockTestId, isPreview: { $ne: true } }) + 1;
     const deadlineAt = new Date(now.getTime() + test.durationMinutes * 60 * 1000);
-    const questions = shuffleSnapshot(test.publishedSnapshot);
+    const questions = cloneSnapshot(test.publishedSnapshot);
     const attempt = await TestAttempt.create({
       userId: req.user._id,
       mockTestId,
@@ -528,7 +642,7 @@ exports.startPreviewAttempt = async (req, res, next) => {
     if (!snapshot.length) return next(new ErrorResponse('This test has no questions yet.', 400));
 
     const deadlineAt = new Date(now.getTime() + test.durationMinutes * 60 * 1000);
-    const shuffled = shuffleSnapshot(snapshot);
+    const questions = cloneSnapshot(snapshot);
     const attempt = await TestAttempt.create({
       userId: req.user._id,
       mockTestId,
@@ -541,8 +655,8 @@ exports.startPreviewAttempt = async (req, res, next) => {
       positiveMarks: test.positiveMarks,
       negativeMarks: test.negativeMarks,
       durationMinutes: test.durationMinutes,
-      questions: shuffled,
-      responses: shuffled.map((question, index) => ({
+      questions,
+      responses: questions.map((question, index) => ({
         order: question.order,
         selected: null,
         markedForReview: false,

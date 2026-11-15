@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  CheckCircle2, Clock3, FileText, ListChecks, Lock, Maximize, PlayCircle, RotateCcw, Search, X,
+  CheckCircle2, Clock3, FileText, Info, Layers, ListChecks, Lock, PlayCircle, RotateCcw, Search,
 } from 'lucide-react';
-import { attemptsApi, authApi, paymentsApi } from '../../services/api';
+import { attemptsApi, paymentsApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import DashboardPageHeader from '../../components/dashboard/DashboardPageHeader';
 import MockTestPayModal from '../../components/MockTestPayModal';
-import { emptyReceipt, PaymentPhase, PaymentReceipt } from '../../components/PaymentStage';
+import PlanBundleInfoModal from '../../components/PlanBundleInfoModal';
+import PaymentStage, { emptyReceipt, PaymentPhase, PaymentReceipt } from '../../components/PaymentStage';
 import { CheckoutClosed, loadRazorpayScript, openSecureCheckout, paymentFailureReason } from '../../utils/razorpayCheckout';
 
 interface ListedTest {
@@ -27,15 +28,19 @@ interface ListedTest {
   offers?: { _id: string; title: string; price: number; testCount: number; courseCount: number }[];
 }
 
-interface Instructions {
-  instructions: string;
-  durationMinutes: number;
-  positiveMarks: number;
-  negativeMarks: number;
-  maxMarks: number;
-  questionCount: number;
+interface PlanCard {
+  _id: string;
+  title: string;
+  description: string;
+  price: number;
   hasAccess: boolean;
-  profileMissing: string[];
+  testCount: number;
+  bundles: {
+    _id: string;
+    title: string;
+    description: string;
+    mockTests: { _id: string; title: string; subject: string; durationMinutes: number; questionCount: number }[];
+  }[];
 }
 
 interface AttemptRow {
@@ -55,30 +60,26 @@ interface AttemptRow {
 
 type Tab = 'available' | 'history';
 
-function errorMessage(err: any, fallback: string) {
-  return err?.response?.data?.error || err?.response?.data?.message || fallback;
-}
-
 const DashboardMockTestsPage: React.FC = () => {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const openId = params.get('test') || '';
-  const { user, updateUserProfile } = useAuth();
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('available');
 
   const [tests, setTests] = useState<ListedTest[]>([]);
+  const [planCards, setPlanCards] = useState<PlanCard[]>([]);
   const [testsLoading, setTestsLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [planCheckout, setPlanCheckout] = useState<{ id: string; title: string; price: number } | null>(null);
+  const [infoPlan, setInfoPlan] = useState<PlanCard | null>(null);
 
   const [attempts, setAttempts] = useState<AttemptRow[]>([]);
   const [attemptsLoading, setAttemptsLoading] = useState(true);
   const [checkoutAvailable, setCheckoutAvailable] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [active, setActive] = useState<ListedTest | null>(null);
-  const [details, setDetails] = useState<Instructions | null>(null);
   const [detailError, setDetailError] = useState('');
-  const [profile, setProfile] = useState({ name: '', city: '', whatsapp: '' });
-  const [starting, setStarting] = useState(false);
   const [buying, setBuying] = useState(false);
   const [payPhase, setPayPhase] = useState<PaymentPhase>('review');
   const [receipt, setReceipt] = useState<PaymentReceipt>(emptyReceipt);
@@ -91,9 +92,10 @@ const DashboardMockTestsPage: React.FC = () => {
     attemptsApi.catalog({ limit: 50 })
       .then((res) => {
         setTests(res.data || []);
+        setPlanCards(res.plans || []);
         setCheckoutAvailable(Boolean(res.checkoutAvailable));
       })
-      .catch(() => setTests([]))
+      .catch(() => { setTests([]); setPlanCards([]); })
       .finally(() => setTestsLoading(false));
     setAttemptsLoading(true);
     attemptsApi.myAttempts({ limit: 50 })
@@ -105,24 +107,23 @@ const DashboardMockTestsPage: React.FC = () => {
   const filteredTests = tests.filter((t) =>
     !search.trim() || t.title.toLowerCase().includes(search.trim().toLowerCase()) || t.subject.toLowerCase().includes(search.trim().toLowerCase())
   );
+  const filteredPlans = planCards.filter((plan) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return [plan.title, plan.description, ...plan.bundles.flatMap((bundle) => [bundle.title, ...bundle.mockTests.map((test) => test.title)])]
+      .join(' ')
+      .toLowerCase()
+      .includes(q);
+  });
 
-  const openTest = async (test: ListedTest) => {
-    setActive(test);
-    setDetails(null);
+  const openTest = (test: ListedTest) => {
     setDetailError('');
     setPayPhase('review');
-    setProfile({
-      name: user?.name || '',
-      city: user?.city || '',
-      whatsapp: user?.whatsapp || user?.phone || '',
-    });
-    if (!test.isFree && !test.hasAccess) return;
-    try {
-      const response = await attemptsApi.instructions(test._id);
-      setDetails(response.data);
-    } catch (err) {
-      setDetailError(errorMessage(err, 'Could not open this test.'));
+    if (!test.isFree && !test.hasAccess) {
+      setActive(test);
+      return;
     }
+    navigate(`/mock-tests/${test._id}/instructions?from=dashboard`);
   };
 
   // Opens the test named in the dashboard link once the list has loaded.
@@ -133,11 +134,10 @@ const DashboardMockTestsPage: React.FC = () => {
     if (!match) return;
     openedRef.current = openId;
     openTest(match);
-  }, [openId, testsLoading, tests, user]);
+  }, [openId, testsLoading, tests]);
 
   const closeTest = () => {
     setActive(null);
-    setDetails(null);
     setDetailError('');
     if (!params.get('test')) return;
     const next = new URLSearchParams(params);
@@ -146,11 +146,12 @@ const DashboardMockTestsPage: React.FC = () => {
     openedRef.current = '';
   };
 
-  const buy = async (purpose: 'plan' | 'mock_test', id: string, title: string) => {
+  const buy = async (purpose: 'plan' | 'mock_test', id: string, title: string, amountHint = 0) => {
+    if (purpose === 'plan') setPlanCheckout({ id, title, price: amountHint });
     setBuying(true);
     setDetailError('');
     setPayPhase('processing');
-    setReceipt({ title, amount: active?.price || 0, orderId: '', reason: '' });
+    setReceipt({ title, amount: amountHint || active?.price || 0, orderId: '', reason: '' });
     let orderId = '';
     try {
       const loaded = await loadRazorpayScript();
@@ -165,7 +166,7 @@ const DashboardMockTestsPage: React.FC = () => {
       });
       const order = orderRes.data;
       orderId = order.orderId;
-      setReceipt({ title, amount: order.finalAmountInRupees || active?.price || 0, orderId, reason: '' });
+      setReceipt({ title, amount: order.finalAmountInRupees || amountHint || active?.price || 0, orderId, reason: '' });
       await openSecureCheckout({
         orderId,
         amount: order.amount,
@@ -179,39 +180,13 @@ const DashboardMockTestsPage: React.FC = () => {
       if (!orderId && !(err instanceof CheckoutClosed)) {
         setPayPhase('review');
         setDetailError(paymentFailureReason(err));
+        if (purpose === 'plan') setPlanCheckout(null);
         return;
       }
       setReceipt((current) => ({ ...current, orderId: orderId || current.orderId, reason: paymentFailureReason(err) }));
       setPayPhase('failed');
     } finally {
       setBuying(false);
-    }
-  };
-
-  const start = async () => {
-    if (!active || !details?.hasAccess) return;
-    setStarting(true);
-    setDetailError('');
-    try {
-      if (details.profileMissing?.length) {
-        await authApi.updateProfile('', profile);
-        await updateUserProfile(profile);
-      }
-      const root = document.documentElement;
-      if (root.requestFullscreen) await root.requestFullscreen();
-      if (active.inProgressAttemptId) {
-        navigate(`/mock-tests/attempt/${active.inProgressAttemptId}`);
-        return;
-      }
-      const response = await attemptsApi.start(active._id);
-      navigate(`/mock-tests/attempt/${response.data._id}`);
-    } catch (err: any) {
-      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
-      const code = err?.response?.data?.code;
-      if (code === 'PROFILE_INCOMPLETE') setDetailError('Enter your name, city, and a 10-digit WhatsApp number.');
-      else setDetailError(errorMessage(err, 'The test could not start. Allow full screen and try again.'));
-    } finally {
-      setStarting(false);
     }
   };
 
@@ -259,16 +234,68 @@ const DashboardMockTestsPage: React.FC = () => {
               <div className="flex justify-center py-16">
                 <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#111827] border-t-transparent" />
               </div>
-            ) : filteredTests.length === 0 ? (
+            ) : filteredPlans.length === 0 && filteredTests.length === 0 ? (
               <div className="rounded-2xl border border-[#E8EDF4] bg-[#F7F9FC] py-16 text-center text-[14px] text-[#64748B]">
                 No mock tests match your search.
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredPlans.map((plan) => (
+                  <div key={plan._id} className="flex flex-col rounded-[18px] border border-[#E8EDF4] bg-white p-5 text-left">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded-full bg-[#EEF1FF] px-2.5 py-1 text-[11px] font-semibold text-[#3267f5]">Plan</span>
+                      {plan.hasAccess ? (
+                        <span className="rounded-full bg-[#E7F8EF] px-2.5 py-1 text-[11px] font-bold text-[#1F9D55]">Unlocked</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#FFF1E8] px-2.5 py-1 text-[11px] font-bold text-[#E07A1F]"><Lock size={10} /> ₹{plan.price}</span>
+                      )}
+                    </div>
+
+                    <h3 className="mt-3 line-clamp-2 text-[15.5px] font-bold leading-snug text-[#101828]">{plan.title}</h3>
+                    {plan.description && <p className="mt-1 line-clamp-2 text-[12.5px] text-[#64748B]">{plan.description}</p>}
+
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-[#64748B]">
+                      <span className="inline-flex items-center gap-1"><Layers size={12} /> Plan</span>
+                      <span className="inline-flex items-center gap-1"><ListChecks size={12} /> {plan.testCount} mock tests</span>
+                    </div>
+
+                    <div className="mt-4 flex-1" />
+
+                    <div className="flex items-center gap-2">
+                      {!plan.hasAccess ? (
+                        <button
+                          type="button"
+                          disabled={buying || !checkoutAvailable}
+                          onClick={() => { setActive(null); buy('plan', plan._id, plan.title, plan.price); }}
+                          className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#111827] py-2.5 text-[13.5px] font-semibold text-white disabled:opacity-50"
+                        >
+                          {buying ? 'Opening…' : 'Buy plan'}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setInfoPlan(plan)}
+                          className="flex min-w-0 flex-1 items-center justify-center rounded-lg bg-[#111827] py-2.5 text-[13.5px] font-semibold text-white"
+                        >
+                          View plan
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setInfoPlan(plan)}
+                        aria-label="More info"
+                        title="More info"
+                        className="inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-lg border border-[#D0D5DD] text-[#344054] hover:bg-[#F7F9FC]"
+                      >
+                        <Info size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
                 {filteredTests.map((test) => {
                   const exhausted = test.attemptLimit > 0 && test.attemptsUsed >= test.attemptLimit && !test.inProgressAttemptId;
                   return (
-                    <div key={test._id} className="flex flex-col rounded-[18px] border border-[#E8EDF4] bg-white p-5">
+                    <div key={test._id} className="flex flex-col rounded-[18px] border border-[#E8EDF4] bg-white p-5 text-left">
                       <div className="flex items-center justify-between gap-2">
                         <span className="rounded-full bg-[#EEF0FF] px-2.5 py-1 text-[11px] font-semibold text-[#6B7CFF]">{test.subject}</span>
                         {test.isFree ? (
@@ -434,47 +461,35 @@ const DashboardMockTestsPage: React.FC = () => {
           receipt={receipt}
           onClose={closeTest}
           onBack={() => { setPayPhase('review'); setDetailError(''); }}
-          onContinue={() => { setPayPhase('review'); setActive(null); setDetails(null); openedRef.current = ''; setReloadKey((value) => value + 1); }}
-          onBuy={buy}
+          onContinue={() => { setPayPhase('review'); setActive(null); openedRef.current = ''; setReloadKey((value) => value + 1); }}
+          onBuy={(purpose, id, title) => buy(purpose, id, title, purpose === 'mock_test' ? active.price : 0)}
         />
       )}
-      {active && (active.isFree || active.hasAccess) && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4 py-8" onClick={(e) => { if (e.target === e.currentTarget) closeTest(); }}>
-          <section className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[#E8EDF4] bg-white p-5 text-left shadow-2xl sm:p-6">
-            <button type="button" onClick={closeTest} aria-label="Close" className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-[#94A3B8] transition-colors hover:bg-[#F1F5F9] hover:text-[#101828]">
-              <X size={18} />
-            </button>
-            <p className="pr-8 text-[20px] font-bold text-[#101828]">{active.title}</p>
-            {details ? (
-              <div className="mt-3">
-                <div className="flex flex-wrap gap-3 text-[13px] text-[#64748B]">
-                  <span>{details.questionCount} questions</span>
-                  <span>{details.durationMinutes} min</span>
-                  {details.maxMarks > 0 && <span>{details.maxMarks} marks</span>}
-                  <span>+{details.positiveMarks} / −{details.negativeMarks}</span>
-                </div>
-                {details.instructions && (
-                  <p className="mt-3 whitespace-pre-wrap text-[14px] leading-relaxed text-[#475569]">
-                    <Maximize size={14} className="mb-0.5 mr-1 inline" />{details.instructions}
-                  </p>
-                )}
-                {details.profileMissing.length > 0 && (
-                  <div className="mt-4 grid gap-2 rounded-xl bg-[#F8FAFC] p-4">
-                    <p className="text-[14px] font-semibold text-[#101828]">Finish your profile to start</p>
-                    {details.profileMissing.includes('name') && <input aria-label="Full name" placeholder="Full name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} className="rounded-md border border-[#E4E7EC] px-3 py-2 text-[14px] outline-none focus:border-[#3267f5]" />}
-                    {details.profileMissing.includes('city') && <input aria-label="City" placeholder="City" value={profile.city} onChange={(event) => setProfile({ ...profile, city: event.target.value })} className="rounded-md border border-[#E4E7EC] px-3 py-2 text-[14px] outline-none focus:border-[#3267f5]" />}
-                    {details.profileMissing.includes('whatsapp') && <input aria-label="WhatsApp number" placeholder="10-digit WhatsApp number" value={profile.whatsapp} onChange={(event) => setProfile({ ...profile, whatsapp: event.target.value })} className="rounded-md border border-[#E4E7EC] px-3 py-2 text-[14px] outline-none focus:border-[#3267f5]" />}
-                  </div>
-                )}
-                <button type="button" disabled={starting} onClick={start} className="mt-4 rounded-md bg-[#111827] px-5 py-2.5 text-[14px] font-semibold text-white disabled:bg-[#D0D5DD]">
-                  {starting ? 'Opening…' : active.inProgressAttemptId ? 'Resume test' : 'Start test in full screen'}
-                </button>
-                {detailError && <p role="alert" className="mt-3 text-[14px] text-[#B42318]">{detailError}</p>}
-              </div>
-            ) : (
-              <p className="mt-3 text-[14px] text-[#64748B]">{detailError || 'Loading test details…'}</p>
-            )}
-          </section>
+      {infoPlan && (
+        <PlanBundleInfoModal
+          plan={infoPlan}
+          onClose={() => setInfoPlan(null)}
+          buying={buying}
+          checkoutAvailable={checkoutAvailable}
+          onBuy={infoPlan.hasAccess ? undefined : () => {
+            const plan = infoPlan;
+            setInfoPlan(null);
+            setActive(null);
+            buy('plan', plan._id, plan.title, plan.price);
+          }}
+        />
+      )}
+      {planCheckout && payPhase !== 'review' && !active && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4 py-8">
+          <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <PaymentStage
+              phase={payPhase === 'processing' ? 'processing' : payPhase === 'paid' ? 'paid' : 'failed'}
+              receipt={receipt}
+              onRetry={() => buy('plan', planCheckout.id, planCheckout.title, planCheckout.price)}
+              onBack={() => { setPayPhase('review'); setPlanCheckout(null); setDetailError(''); }}
+              onContinue={() => { setPayPhase('review'); setPlanCheckout(null); setReloadKey((value) => value + 1); }}
+            />
+          </div>
         </div>
       )}
     </div>

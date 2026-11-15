@@ -36,6 +36,7 @@ const AdminQuestionBankPage    = lazy(() => import('./pages/admin/AdminQuestionB
 const AdminMockTestsPage       = lazy(() => import('./pages/admin/AdminMockTestsPage'));
 const AdminPlansPage            = lazy(() => import('./pages/admin/AdminPlansPage'));
 const MockTestsPage             = lazy(() => import('./pages/MockTestsPage'));
+const MockTestInstructionsPage  = lazy(() => import('./pages/MockTestInstructionsPage'));
 const MockTestRoomPage          = lazy(() => import('./pages/MockTestRoomPage'));
 const MockTestResultPage       = lazy(() => import('./pages/MockTestResultPage'));
 const DashboardOverviewPage    = lazy(() => import('./pages/dashboard/DashboardOverviewPage'));
@@ -139,6 +140,11 @@ function AppContent() {
                 <Route path="/videos" element={<Navigate to="/" replace />} />
                 <Route path="/college-predictor" element={<Navigate to="/" replace />} />
                 <Route path="/mock-tests" element={<MockTestsPage />} />
+                <Route path="/mock-tests/:testId/instructions" element={
+                  <ProtectedRoute>
+                    <MockTestInstructionsPage />
+                  </ProtectedRoute>
+                } />
                 <Route path="/mock-tests/attempt/:attemptId" element={
                   <ProtectedRoute>
                     <MockTestRoomPage />

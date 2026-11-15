@@ -21,6 +21,19 @@ const SharedNavbar: React.FC = () => {
 
   useEffect(() => { setOpen(false); }, [location.pathname]);
 
+  // Lock page scroll while the drawer is open; close on Escape.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   const active = (path: string) => path === '/'
     ? location.pathname === '/'
     : location.pathname === path || location.pathname.startsWith(`${path}/`);
@@ -60,20 +73,61 @@ const SharedNavbar: React.FC = () => {
           )}
         </div>
 
-        <button type="button" className="shrink-0 rounded-lg border border-[#E8EDF4] p-2 text-[#101828] md:hidden" aria-label="Toggle menu" onClick={() => setOpen((value) => !value)}>
-          {open ? <X size={18} /> : <Menu size={18} />}
+        <button type="button" className="shrink-0 rounded-lg border border-[#E8EDF4] p-2 text-[#101828] lg:hidden" aria-label="Open menu" aria-expanded={open} onClick={() => setOpen(true)}>
+          <Menu size={18} />
         </button>
       </div>
 
-      {open && (
-        <nav className="space-y-1 border-t border-slate-100 bg-white px-4 py-3 md:hidden">
-          {links.map((link) => (
-            <Link key={link.to} to={link.to} className="block rounded-lg px-3 py-2.5 text-sm font-medium text-slate-700">{link.label}</Link>
-          ))}
-          <Link to={isSignedIn ? '/student/dashboard' : '/login'} className="block rounded-lg px-3 py-2.5 text-sm font-medium text-slate-700">{isSignedIn ? 'Dashboard' : 'Login'}</Link>
-          {!isSignedIn && <Link to="/signup" className="mt-1 block rounded-full bg-slate-900 px-3 py-2.5 text-center text-sm font-semibold text-white">Get Started</Link>}
-        </nav>
-      )}
+      {/* Side drawer: overlays the page instead of pushing content down */}
+      <div className={`fixed inset-0 z-50 lg:hidden ${open ? '' : 'pointer-events-none'}`} aria-hidden={!open}>
+        <div
+          className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ${open ? 'opacity-100' : 'opacity-0'}`}
+          onClick={() => setOpen(false)}
+        />
+        <aside
+          className={`absolute inset-y-0 right-0 flex w-[300px] max-w-[85vw] flex-col bg-white shadow-2xl transition-transform duration-300 ease-out ${open ? 'translate-x-0' : 'translate-x-full'}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Menu"
+        >
+          <div className="flex h-[72px] shrink-0 items-center justify-between border-b border-[#E8EDF4] px-5">
+            <Link to="/" aria-label="HeyStudent home">
+              <img src="/logo-mark.png" alt="HeyStudent" className="h-9 w-auto" />
+            </Link>
+            <button type="button" aria-label="Close menu" onClick={() => setOpen(false)} className="rounded-lg border border-[#E8EDF4] p-2 text-[#101828]">
+              <X size={18} />
+            </button>
+          </div>
+
+          <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4" aria-label="Mobile">
+            {links.map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                className={`block rounded-xl px-4 py-3 text-[15px] font-semibold ${active(link.to) ? 'bg-[#EEF1FF] text-[#3267f5]' : 'text-[#334155] hover:bg-[#F1F5F9]'}`}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+
+          <div className="shrink-0 space-y-2 border-t border-[#E8EDF4] p-4">
+            {isLoaded && isSignedIn ? (
+              <>
+                {user?.role === 'admin' && <Link to="/admin" className="block rounded-xl px-4 py-2.5 text-[14px] font-semibold text-[#64748B] hover:bg-[#F1F5F9]">Admin</Link>}
+                {user?.role === 'institute' && <Link to="/institute/dashboard" className="block rounded-xl px-4 py-2.5 text-[14px] font-semibold text-[#64748B] hover:bg-[#F1F5F9]">Institute</Link>}
+                <Link to="/student/dashboard" className="block rounded-xl border border-[#D0D5DD] px-4 py-3 text-center text-[14px] font-semibold text-[#101828]">Dashboard</Link>
+                <button type="button" onClick={() => signOut()} className="w-full rounded-xl bg-[#111827] px-4 py-3 text-[14px] font-semibold text-white">Sign out</button>
+              </>
+            ) : (
+              <>
+                <Link to="/login" className="block rounded-xl border border-[#D0D5DD] px-4 py-3 text-center text-[14px] font-semibold text-[#101828]">Login</Link>
+                <Link to="/signup" className="block rounded-xl bg-[#111827] px-4 py-3 text-center text-[14px] font-semibold text-white">Get Started</Link>
+              </>
+            )}
+          </div>
+        </aside>
+      </div>
     </header>
   );
 };

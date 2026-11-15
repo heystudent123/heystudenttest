@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardList, Eye, Maximize, PlayCircle, Plus, Trash2, X } from 'lucide-react';
-import { attemptsApi, mockTestsApi, questionBanksApi } from '../../services/api';
+import { ClipboardList, Eye, Layers, PlayCircle, Plus, Trash2, X } from 'lucide-react';
+import { bundlesApi, mockTestsApi, questionBanksApi } from '../../services/api';
 import AdminPageHeader from '../../components/admin/AdminPageHeader';
 
 interface QuestionBankOption {
@@ -9,6 +9,9 @@ interface QuestionBankOption {
   title: string;
   questionCount: number;
 }
+
+type SaleType = 'free' | 'paid' | 'bundle';
+type AdminTab = 'tests' | 'bundles';
 
 interface MockTestSummary {
   _id: string;
@@ -19,36 +22,42 @@ interface MockTestSummary {
   positiveMarks: number;
   negativeMarks: number;
   maxMarks: number;
+  saleType?: SaleType;
   isFree: boolean;
   price: number;
   snapshotVersion: number;
 }
 
+interface BundleRecord {
+  _id: string;
+  title: string;
+  description: string;
+  mockTestIds: string[];
+}
+
 interface TestForm {
   title: string;
   description: string;
-  instructions: string;
   category: string;
   chapter: string;
   durationMinutes: string;
   positiveMarks: string;
   negativeMarks: string;
   attemptLimit: string;
-  isFree: boolean;
+  saleType: SaleType;
   price: string;
 }
 
 const blankForm = (): TestForm => ({
   title: '',
   description: '',
-  instructions: '',
   category: 'CUET',
   chapter: '',
   durationMinutes: '60',
   positiveMarks: '5',
   negativeMarks: '1',
   attemptLimit: '1',
-  isFree: true,
+  saleType: 'free',
   price: '0',
 });
 
@@ -56,14 +65,30 @@ function errorMessage(err: any, fallback: string) {
   return err?.response?.data?.error || err?.response?.data?.message || fallback;
 }
 
+function saleTypeOf(test: { saleType?: SaleType; isFree?: boolean }): SaleType {
+  if (test.saleType === 'free' || test.saleType === 'paid' || test.saleType === 'bundle') return test.saleType;
+  return test.isFree ? 'free' : 'paid';
+}
+
+function saleLabel(type: SaleType, price = 0) {
+  if (type === 'free') return 'Free';
+  if (type === 'bundle') return 'Bundle only';
+  return `₹${price}`;
+}
+
 function toPayload(form: TestForm, questionBankId: string, fallbackIds: string[]) {
   return {
-    ...form,
+    title: form.title,
+    description: form.description,
+    category: form.category,
+    chapter: form.chapter,
     durationMinutes: Number(form.durationMinutes),
     positiveMarks: Number(form.positiveMarks),
     negativeMarks: Number(form.negativeMarks),
     attemptLimit: Number(form.attemptLimit),
-    price: form.isFree ? 0 : Number(form.price),
+    saleType: form.saleType,
+    isFree: form.saleType === 'free',
+    price: form.saleType === 'paid' ? Number(form.price) : 0,
     questionBankId: questionBankId || null,
     questionIds: questionBankId ? [] : fallbackIds,
   };
@@ -80,12 +105,12 @@ const StatusPill: React.FC<{ status: MockTestSummary['status'] }> = ({ status })
 
 const AdminMockTestsPage: React.FC = () => {
   const navigate = useNavigate();
+  const [tab, setTab] = useState<AdminTab>('tests');
   const [tests, setTests] = useState<MockTestSummary[]>([]);
+  const [bundles, setBundles] = useState<BundleRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [attemptingId, setAttemptingId] = useState<string | null>(null);
-  const [confirmAttempt, setConfirmAttempt] = useState<MockTestSummary | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [status, setStatus] = useState<MockTestSummary['status'] | null>(null);
   const [form, setForm] = useState<TestForm>(blankForm);
@@ -96,14 +121,23 @@ const AdminMockTestsPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<MockTestSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [bundleFormOpen, setBundleFormOpen] = useState(false);
+  const [editingBundleId, setEditingBundleId] = useState<string | null>(null);
+  const [bundleForm, setBundleForm] = useState({ title: '', description: '', mockTestIds: [] as string[] });
+  const [confirmDeleteBundle, setConfirmDeleteBundle] = useState<BundleRecord | null>(null);
 
   const locked = status === 'published';
+  const bundleOnlyTests = tests.filter((test) => saleTypeOf(test) === 'bundle');
 
   const loadTests = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await mockTestsApi.list({ limit: 50 } as { page?: number });
-      setTests(response.data || []);
+      const [testRes, bundleRes] = await Promise.all([
+        mockTestsApi.list({ limit: 50 } as { page?: number }),
+        bundlesApi.list(),
+      ]);
+      setTests(testRes.data || []);
+      setBundles(bundleRes.data || []);
     } catch (err) {
       setError(errorMessage(err, 'Could not load mock tests.'));
     } finally {
@@ -142,14 +176,13 @@ const AdminMockTestsPage: React.FC = () => {
       setForm({
         title: test.title || '',
         description: test.description || '',
-        instructions: test.instructions || '',
         category: test.category || 'CUET',
         chapter: test.chapter || '',
         durationMinutes: String(test.durationMinutes ?? 60),
         positiveMarks: String(test.positiveMarks ?? 1),
         negativeMarks: String(test.negativeMarks ?? 0),
         attemptLimit: String(test.attemptLimit ?? 1),
-        isFree: Boolean(test.isFree),
+        saleType: saleTypeOf(test),
         price: String(test.price ?? 0),
       });
       setBankId(test.questionBankId ? String(test.questionBankId) : '');
@@ -160,21 +193,8 @@ const AdminMockTestsPage: React.FC = () => {
     }
   };
 
-  const attemptTest = async (test: MockTestSummary) => {
-    setError('');
-    setAttemptingId(test._id);
-    try {
-      const response = await attemptsApi.startPreview(test._id);
-      const root = document.documentElement;
-      if (root.requestFullscreen) await root.requestFullscreen();
-      navigate(`/mock-tests/attempt/${response.data._id}`);
-    } catch (err) {
-      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
-      setError(errorMessage(err, 'Could not start the preview. Add at least one question first.'));
-    } finally {
-      setAttemptingId(null);
-      setConfirmAttempt(null);
-    }
+  const attemptTest = (test: MockTestSummary) => {
+    navigate(`/mock-tests/${test._id}/instructions?preview=1&from=admin&title=${encodeURIComponent(test.title)}`);
   };
 
   const save = async () => {
@@ -186,7 +206,6 @@ const AdminMockTestsPage: React.FC = () => {
         await mockTestsApi.update(editingId, {
           title: form.title,
           description: form.description,
-          instructions: form.instructions,
           category: form.category,
           chapter: form.chapter,
         });
@@ -267,12 +286,72 @@ const AdminMockTestsPage: React.FC = () => {
     }
   };
 
+  const openCreateBundle = () => {
+    setEditingBundleId(null);
+    setBundleForm({ title: '', description: '', mockTestIds: [] });
+    setError('');
+    setBundleFormOpen(true);
+  };
+
+  const openEditBundle = (bundle: BundleRecord) => {
+    setEditingBundleId(bundle._id);
+    setBundleForm({
+      title: bundle.title,
+      description: bundle.description || '',
+      mockTestIds: (bundle.mockTestIds || []).map(String),
+    });
+    setError('');
+    setBundleFormOpen(true);
+  };
+
+  const toggleBundleTest = (id: string) => {
+    setBundleForm((current) => ({
+      ...current,
+      mockTestIds: current.mockTestIds.includes(id)
+        ? current.mockTestIds.filter((item) => item !== id)
+        : [...current.mockTestIds, id],
+    }));
+  };
+
+  const saveBundle = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      if (editingBundleId) await bundlesApi.update(editingBundleId, bundleForm);
+      else await bundlesApi.create(bundleForm);
+      setNotice(editingBundleId ? 'Bundle saved.' : 'Bundle created.');
+      setBundleFormOpen(false);
+      await loadTests();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not save the bundle.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onDeleteBundle = async () => {
+    if (!confirmDeleteBundle) return;
+    setDeleting(true);
+    setError('');
+    try {
+      await bundlesApi.remove(confirmDeleteBundle._id);
+      setNotice('Bundle deleted.');
+      setConfirmDeleteBundle(null);
+      await loadTests();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not delete the bundle.'));
+      setConfirmDeleteBundle(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const field = (key: keyof TestForm, label: string, type = 'text', span = 1) => (
     <div className={span === 2 ? 'sm:col-span-2' : ''}>
       <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">{label}</label>
       <input
         type={type}
-        disabled={locked && !['title', 'description', 'instructions', 'category', 'chapter'].includes(key)}
+        disabled={locked && !['title', 'description', 'category', 'chapter'].includes(key)}
         value={String(form[key] ?? '')}
         onChange={(e) => setForm({ ...form, [key]: e.target.value })}
         className="w-full rounded-lg border border-[#D0D5DD] px-3.5 py-2.5 text-[14px] focus:border-[#111827] focus:outline-none focus:ring-1 focus:ring-[#111827] disabled:bg-[#F7F9FC]"
@@ -284,18 +363,74 @@ const AdminMockTestsPage: React.FC = () => {
     <div>
       <AdminPageHeader
         title="Mock Tests"
-        description="Link a question bank, set marking, and publish."
+        description="Create free, paid, or bundle-only tests. Group bundle tests here, then attach those bundles to a plan."
         actions={
-          <button onClick={startNew} className="inline-flex items-center gap-1.5 rounded-lg bg-[#111827] px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#1F2937]">
-            <Plus size={14} /> New Test
-          </button>
+          tab === 'tests' ? (
+            <button onClick={startNew} className="inline-flex items-center gap-1.5 rounded-lg bg-[#111827] px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#1F2937]">
+              <Plus size={14} /> New Test
+            </button>
+          ) : (
+            <button onClick={openCreateBundle} className="inline-flex items-center gap-1.5 rounded-lg bg-[#111827] px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#1F2937]">
+              <Plus size={14} /> Create a Bundle
+            </button>
+          )
         }
       />
+
+      <div className="border-b border-[#E8EDF4] bg-white px-6 lg:px-10">
+        <div className="flex gap-6">
+          {([
+            { key: 'tests', label: 'Tests' },
+            { key: 'bundles', label: 'Bundles' },
+          ] as const).map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setTab(item.key)}
+              className={`border-b-2 px-1 py-3.5 text-[14px] font-semibold transition-colors ${
+                tab === item.key ? 'border-[#111827] text-[#101828]' : 'border-transparent text-[#94A3B8] hover:text-[#475569]'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="px-6 py-6 lg:px-10">
         {error && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-800">{error}</p>}
         {notice && <p role="status" className="mb-4 rounded-lg border border-green-200 bg-green-50 px-3.5 py-2.5 text-[13px] text-green-800">{notice}</p>}
 
+        {tab === 'bundles' ? (
+          <div className="rounded-2xl border border-[#E8EDF4] bg-white">
+            {loading ? (
+              <div className="flex justify-center py-16">
+                <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#111827] border-t-transparent" />
+              </div>
+            ) : bundles.length === 0 ? (
+              <div className="py-16 text-center text-[13.5px] text-[#64748B]">No bundles yet. Mark tests as Bundle only, then create a bundle.</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                {bundles.map((bundle) => (
+                  <div key={bundle._id} className="rounded-xl border border-[#E8EDF4] p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#EEF1FF] text-[#3267f5]"><Layers size={16} /></span>
+                      <span className="rounded-full bg-[#F1F5F9] px-2 py-0.5 text-[11px] font-semibold text-[#64748B]">
+                        {(bundle.mockTestIds || []).length} test{(bundle.mockTestIds || []).length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <h3 className="mt-3 text-[15px] font-bold text-[#101828]">{bundle.title}</h3>
+                    {bundle.description && <p className="mt-1 line-clamp-2 text-[12.5px] text-[#64748B]">{bundle.description}</p>}
+                    <div className="mt-4 flex gap-2">
+                      <button type="button" onClick={() => openEditBundle(bundle)} className="flex-1 rounded-lg border border-[#D0D5DD] py-2 text-[12.5px] font-semibold text-[#344054] hover:bg-[#F7F9FC]">Edit</button>
+                      <button type="button" onClick={() => setConfirmDeleteBundle(bundle)} className="rounded-lg border border-[#D0D5DD] px-3 py-2 text-[12.5px] font-semibold text-[#DC2626] hover:bg-[#FEF2F2]"><Trash2 size={13} /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="rounded-2xl border border-[#E8EDF4] bg-white">
           {loading ? (
             <div className="flex justify-center py-16">
@@ -313,15 +448,15 @@ const AdminMockTestsPage: React.FC = () => {
                       <StatusPill status={test.status} />
                       <span>{test.questionCount} Qs</span>
                       <span>{test.durationMinutes} min</span>
-                      <span>{test.isFree ? 'Free' : `₹${test.price}`}</span>
+                      <span>{saleLabel(saleTypeOf(test), test.price)}</span>
                     </div>
                     <div className="mt-2 flex items-center gap-3">
                       <button
-                        onClick={() => setConfirmAttempt(test)}
-                        disabled={attemptingId === test._id || test.questionCount === 0}
+                        onClick={() => attemptTest(test)}
+                        disabled={test.questionCount === 0}
                         className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#3267f5] disabled:opacity-40"
                       >
-                        <PlayCircle size={12} /> {attemptingId === test._id ? 'Starting…' : 'Attempt'}
+                        <PlayCircle size={12} /> Attempt
                       </button>
                       {test.status !== 'published' && (
                         <button onClick={() => setConfirmDelete(test)} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#DC2626]"><Trash2 size={12} /> Delete</button>
@@ -350,12 +485,12 @@ const AdminMockTestsPage: React.FC = () => {
                       <td className="px-5 py-3.5"><StatusPill status={test.status} /></td>
                       <td className="px-5 py-3.5">{test.questionCount}</td>
                       <td className="px-5 py-3.5">{test.durationMinutes} min</td>
-                      <td className="px-5 py-3.5">{test.isFree ? 'Free' : `₹${test.price.toLocaleString('en-IN')}`}</td>
+                      <td className="px-5 py-3.5">{saleLabel(saleTypeOf(test), test.price)}</td>
                       <td className="px-5 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
-                            onClick={() => setConfirmAttempt(test)}
-                            disabled={attemptingId === test._id || test.questionCount === 0}
+                            onClick={() => attemptTest(test)}
+                            disabled={test.questionCount === 0}
                             title={test.questionCount === 0 ? 'Add questions before attempting' : 'Attempt this test'}
                             className="inline-flex items-center gap-1 rounded-lg border border-[#D0D5DD] px-2.5 py-1.5 text-[12px] font-semibold text-[#3267f5] transition-colors hover:bg-[#EEF1FF] disabled:opacity-40"
                           >
@@ -374,6 +509,7 @@ const AdminMockTestsPage: React.FC = () => {
             </>
           )}
         </div>
+        )}
       </div>
 
       {/* Create / edit test */}
@@ -403,10 +539,6 @@ const AdminMockTestsPage: React.FC = () => {
             <div className="mt-5 space-y-4">
               {field('title', 'Title', 'text', 2)}
               {field('description', 'Description', 'text', 2)}
-              <div className="sm:col-span-2">
-                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Instructions</label>
-                <textarea rows={3} value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} className="w-full rounded-lg border border-[#D0D5DD] px-3.5 py-2.5 text-[14px] focus:border-[#111827] focus:outline-none focus:ring-1 focus:ring-[#111827]" />
-              </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {field('category', 'Category')}
                 {field('chapter', 'Subject')}
@@ -416,17 +548,38 @@ const AdminMockTestsPage: React.FC = () => {
                 {field('negativeMarks', 'Marks deducted for wrong answer', 'number')}
               </div>
 
-              <div className="flex items-center gap-2">
-                <input id="isFree" type="checkbox" checked={form.isFree} disabled={locked} onChange={(e) => setForm({ ...form, isFree: e.target.checked })} className="h-4 w-4 rounded border-[#D0D5DD]" />
-                <label htmlFor="isFree" className="text-[13.5px] font-medium text-[#344054]">Free test</label>
+              <div>
+                <p className="mb-1.5 text-[13px] font-semibold text-[#344054]">Sale type</p>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { key: 'free', label: 'Free' },
+                    { key: 'paid', label: 'Paid' },
+                    { key: 'bundle', label: 'Bundle only' },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      disabled={locked}
+                      onClick={() => setForm({ ...form, saleType: option.key })}
+                      className={`rounded-lg border px-3 py-2 text-[13px] font-semibold disabled:opacity-50 ${
+                        form.saleType === option.key
+                          ? 'border-[#111827] bg-[#111827] text-white'
+                          : 'border-[#D0D5DD] text-[#344054] hover:bg-[#F7F9FC]'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                {form.saleType === 'bundle' && (
+                  <p className="mt-2 text-[12.5px] text-[#64748B]">This test cannot be sold alone. Add it to a bundle, then attach that bundle to a plan.</p>
+                )}
               </div>
-              {!form.isFree && (
+              {form.saleType === 'paid' && (
                 <div className="max-w-[200px]">
                   {field('price', 'Price (₹)', 'number')}
                 </div>
               )}
-              <p className="text-[12px] text-[#94A3B8]">Question order and answer options are always shuffled per attempt — no setup needed.</p>
-
               <div className="border-t border-[#E8EDF4] pt-4">
                 <h3 className="text-[13.5px] font-bold text-[#101828]">Question bank</h3>
                 <p className="mt-0.5 text-[12px] text-[#94A3B8]">The whole bank is included. Publishing copies its questions as they are at that moment.</p>
@@ -494,39 +647,71 @@ const AdminMockTestsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Fullscreen warning before launching a preview attempt */}
-      {confirmAttempt && (
+      {bundleFormOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
-          onClick={(e) => { if (e.target === e.currentTarget) setConfirmAttempt(null); }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8"
+          onClick={(e) => { if (e.target === e.currentTarget) setBundleFormOpen(false); }}
         >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="preview-fullscreen-title">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#EEF1FF] text-[#3267f5]">
-              <Maximize size={20} />
-            </span>
-            <h2 id="preview-fullscreen-title" className="mt-3 text-[17px] font-extrabold text-[#101828]">This preview opens in full screen</h2>
-            <p className="mt-2 text-[13.5px] leading-relaxed text-[#64748B]">
-              Close any other tabs or windows first — leaving full screen or switching away ends the preview early, just like it would for a student.
-            </p>
-            <p className="mt-2 text-[13.5px] leading-relaxed text-[#64748B]">
-              This run is never saved or counted — it's only to check the exam experience.
-            </p>
-            <div className="mt-5 flex gap-2">
-              <button type="button" onClick={() => setConfirmAttempt(null)} className="flex-1 rounded-lg border border-[#D0D5DD] py-2.5 text-[13.5px] font-semibold text-[#344054] hover:bg-[#F7F9FC]">
-                Not yet
-              </button>
-              <button
-                type="button"
-                onClick={() => attemptTest(confirmAttempt)}
-                disabled={attemptingId === confirmAttempt._id}
-                className="flex-1 rounded-lg bg-[#111827] py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#1F2937] disabled:opacity-60"
-              >
-                {attemptingId === confirmAttempt._id ? 'Starting…' : 'Enter full screen & start'}
+          <div className="relative max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+            <button type="button" onClick={() => setBundleFormOpen(false)} aria-label="Close" className="absolute right-4 top-4 flex h-7 w-7 items-center justify-center rounded-full text-[#94A3B8] hover:bg-[#F1F5F9] hover:text-[#101828]">
+              <X size={16} />
+            </button>
+            <div className="flex items-center gap-2 pr-6">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#EEF1FF] text-[#3267f5]"><Layers size={17} /></span>
+              <h2 className="text-[17px] font-extrabold text-[#101828]">{editingBundleId ? 'Edit Bundle' : 'Create a Bundle'}</h2>
+            </div>
+            <div className="mt-5 space-y-4">
+              <div>
+                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Title *</label>
+                <input value={bundleForm.title} onChange={(e) => setBundleForm({ ...bundleForm, title: e.target.value })} className="w-full rounded-lg border border-[#D0D5DD] px-3.5 py-2.5 text-[14px] focus:border-[#111827] focus:outline-none focus:ring-1 focus:ring-[#111827]" />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Description</label>
+                <textarea rows={3} value={bundleForm.description} onChange={(e) => setBundleForm({ ...bundleForm, description: e.target.value })} className="w-full rounded-lg border border-[#D0D5DD] px-3.5 py-2.5 text-[14px] focus:border-[#111827] focus:outline-none focus:ring-1 focus:ring-[#111827]" />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Bundle-only mock tests *</label>
+                <div className="max-h-48 space-y-1 overflow-auto rounded-lg border border-[#E8EDF4] p-3">
+                  {bundleOnlyTests.length === 0 && (
+                    <p className="text-[13px] text-[#94A3B8]">No bundle-only tests yet. Create a test and set sale type to Bundle only.</p>
+                  )}
+                  {bundleOnlyTests.map((test) => (
+                    <label key={test._id} className="flex items-center gap-2 text-[13.5px] text-[#344054]">
+                      <input type="checkbox" checked={bundleForm.mockTestIds.includes(test._id)} onChange={() => toggleBundleTest(test._id)} className="h-4 w-4 rounded border-[#D0D5DD]" />
+                      {test.title}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-2">
+              <button type="button" onClick={() => setBundleFormOpen(false)} className="rounded-lg border border-[#D0D5DD] px-4 py-2.5 text-[13.5px] font-semibold text-[#344054] hover:bg-[#F7F9FC]">Cancel</button>
+              <button type="button" onClick={saveBundle} disabled={saving} className="rounded-lg bg-[#111827] px-4 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#1F2937] disabled:opacity-50">
+                {saving ? 'Saving…' : 'Save bundle'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {confirmDeleteBundle && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setConfirmDeleteBundle(null); }}
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <h2 className="text-[17px] font-extrabold text-[#101828]">Delete this bundle?</h2>
+            <p className="mt-1.5 text-[13px] text-[#64748B]"><span className="font-semibold text-[#101828]">{confirmDeleteBundle.title}</span> will be permanently removed.</p>
+            <div className="mt-5 flex gap-2">
+              <button type="button" onClick={() => setConfirmDeleteBundle(null)} className="flex-1 rounded-lg border border-[#D0D5DD] py-2.5 text-[13.5px] font-semibold text-[#344054] hover:bg-[#F7F9FC]">Cancel</button>
+              <button type="button" onClick={onDeleteBundle} disabled={deleting} className="flex-1 rounded-lg bg-[#DC2626] py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#B91C1C] disabled:opacity-60">
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

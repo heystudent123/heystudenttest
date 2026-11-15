@@ -61,16 +61,16 @@ const HomePage: React.FC = () => {
 
       <section className="hs-hero flex w-full max-w-full items-center bg-white px-6 pb-6 pt-4 lg:px-10">
         <div className="grid w-full min-w-0 items-center gap-6 lg:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="min-w-0 text-left lg:pl-16 xl:pl-24">
+          <div className="min-w-0 text-center lg:pl-16 lg:text-left xl:pl-24">
             <p className="hs-hero-eyebrow">CUET preparation made simple</p>
             <h1 className="mt-4">
               <span className="block whitespace-nowrap">Your CUET</span>
               <span className="accent block whitespace-nowrap">Success Partner</span>
             </h1>
-            <p className="hs-hero-description mt-5 max-w-[520px]">
+            <p className="hs-hero-description mx-auto mt-5 max-w-[520px] lg:mx-0">
               Practice with real exam pattern mock tests, learn from expert courses, and track your progress — all in one place.
             </p>
-            <div className="mt-6 flex flex-wrap gap-3">
+            <div className="mt-6 flex flex-wrap justify-center gap-3 lg:justify-start">
               <Link to="/mock-tests" className="hs-hero-button inline-flex items-center gap-2 rounded-md bg-[#111827] px-5 py-3 text-white">
                 Explore Mock Tests <ArrowRight size={16} />
               </Link>
@@ -78,7 +78,7 @@ const HomePage: React.FC = () => {
                 View Courses
               </Link>
             </div>
-            <div className="mt-6 flex items-center gap-3">
+            <div className="mt-6 flex items-center justify-center gap-3 lg:justify-start">
               <div className="flex -space-x-2">
                 {founders.map((person) => (
                   <img key={person.name} src={person.photo} alt="" width={32} height={32} className="h-8 w-8 rounded-full border-2 border-white object-cover" />
@@ -88,7 +88,7 @@ const HomePage: React.FC = () => {
             </div>
           </div>
 
-          <div className="hero-visual-slot justify-self-end">
+          <div className="hero-visual-slot justify-self-center lg:justify-self-end">
             <div className="hero-visual">
               <img
                 src="/girl%20image.png"
@@ -231,8 +231,8 @@ const HomePage: React.FC = () => {
       </section>
 
       <section className="relative bg-[#F4F6FB] px-8 py-16 sm:px-14 lg:px-24">
-        <div className="grid items-center gap-8 xl:grid-cols-[minmax(240px,300px)_1fr]">
-          <div className="relative text-left">
+        <div className="grid items-center gap-8 xl:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
+          <div className="relative min-w-0 text-left">
             <span aria-hidden="true" className="pointer-events-none absolute -bottom-10 left-0 select-none font-serif text-[180px] leading-none text-[#E4EAF3]">“</span>
             <p className="mb-4 flex items-center gap-3 text-[14px] font-bold uppercase tracking-[2px] text-[#94A3B8]">
               <span>04</span>
@@ -247,26 +247,26 @@ const HomePage: React.FC = () => {
               HeyStudent was started by Moksh Jindal and Naman Kumar after they sat CUET and kept getting the same questions from juniors.
             </p>
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="grid gap-5 xl:grid-cols-2">
               {founders.map((person) => (
-                <article key={person.name} className="flex min-h-[280px] gap-4 rounded-[22px] bg-white p-4 text-left shadow-[0_10px_30px_rgba(16,24,40,0.06)]">
+                <article key={person.name} className="flex min-w-0 flex-col gap-4 rounded-[22px] bg-white p-4 text-left shadow-[0_10px_30px_rgba(16,24,40,0.06)] sm:min-h-[280px] sm:flex-row">
                   <img
                     src={person.photo}
                     alt={person.name}
                     width={220}
                     height={280}
                     loading="lazy"
-                    className="h-auto w-[176px] shrink-0 self-stretch rounded-2xl object-cover object-top sm:w-[196px]"
+                    className="h-64 w-full shrink-0 rounded-2xl object-cover object-top sm:h-auto sm:w-[196px] sm:self-stretch"
                   />
                   <div className="flex min-w-0 flex-1 flex-col">
                     <div className={`rounded-xl px-3 py-3 ${person.badge}`}>
                       <div className="flex items-start gap-2">
                         <Trophy size={18} className="mt-0.5 shrink-0" color={person.trophy} fill={person.trophy} />
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-[18px] font-bold leading-none text-[#101828]">{person.air}</p>
-                          <p className="mt-1.5 whitespace-nowrap text-[13px] leading-snug text-[#64748B]">{person.year}</p>
-                          <p className="whitespace-nowrap text-[13px] leading-snug text-[#64748B]">{person.college}</p>
+                          <p className="mt-1.5 text-[13px] leading-snug text-[#64748B]">{person.year}</p>
+                          <p className="text-[13px] leading-snug text-[#64748B]">{person.college}</p>
                         </div>
                       </div>
                     </div>
@@ -289,9 +289,9 @@ const HomePage: React.FC = () => {
             <circle cx="210" cy="210" r="170" fill="none" stroke="currentColor" strokeWidth="1.5" />
             <circle cx="210" cy="210" r="210" fill="none" stroke="currentColor" strokeWidth="1.5" />
           </svg>
-          <div className="relative grid items-center gap-8 lg:grid-cols-[minmax(280px,1fr)_minmax(320px,1.05fr)]">
-            <div className="text-left">
-              <p className="mb-4 flex items-center gap-3 text-[14px] font-bold uppercase tracking-[2px] text-[#94A3B8]">
+          <div className="relative grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+            <div className="hs-center-mobile min-w-0 text-left">
+              <p className="mb-4 flex items-center justify-center gap-3 text-[14px] font-bold uppercase tracking-[2px] text-[#94A3B8] lg:justify-start">
                 <span>05</span>
                 <span className="h-px w-16 bg-[#C9D2E3]" />
                 <span>Get started</span>
@@ -300,7 +300,7 @@ const HomePage: React.FC = () => {
               <p className="mt-5 max-w-[420px] text-left text-[16px] leading-relaxed text-[#64748B]">
                 Join thousands of students and take a step closer to your dream university.
               </p>
-              <div className="mt-8 flex flex-wrap gap-3">
+              <div className="mt-8 flex flex-wrap justify-center gap-3 lg:justify-start">
                 <Link to="/signup" className="inline-flex items-center gap-2 rounded-md bg-[#111827] px-5 py-3 text-[15px] font-semibold text-white">
                   Create Free Account <ArrowRight size={16} />
                 </Link>
@@ -309,13 +309,13 @@ const HomePage: React.FC = () => {
                 </Link>
               </div>
             </div>
-            <div className="flex items-center justify-center gap-2 sm:gap-4">
+            <div className="flex min-w-0 flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
               <img
                 src="/Last%20section%20image.png"
                 alt="Student at a laptop with a checklist: Learn, Practice, Improve, Succeed"
-                className="h-auto w-full max-w-[460px]"
+                className="h-auto min-w-0 w-full max-w-[460px] sm:flex-1"
               />
-              <p className="shrink-0 text-left text-[28px] leading-[1.05] text-[#334155] sm:text-[32px]" style={{ fontFamily: 'Caveat, cursive' }}>
+              <p className="shrink-0 text-center text-[28px] leading-[1.05] text-[#334155] sm:text-left sm:text-[32px]" style={{ fontFamily: 'Caveat, cursive' }}>
                 Better
                 <br />
                 Practice
@@ -323,7 +323,7 @@ const HomePage: React.FC = () => {
                 Brighter
                 <br />
                 Tomorrow
-                <svg className="mt-1 h-3 w-20 text-[#3267f5]" viewBox="0 0 80 12" aria-hidden="true">
+                <svg className="mx-auto mt-1 block h-3 w-20 text-[#3267f5] sm:mx-0" viewBox="0 0 80 12" aria-hidden="true">
                   <path d="M2 8c10-6 18 4 28-1s16 5 26 0 16-2 22 1" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
                 </svg>
               </p>

@@ -83,17 +83,20 @@ function validateMockTest(body, { publishing = false } = {}) {
   if (publishing && questionIds.length === 0) {
     errors.push('Add at least one question before publishing.');
   }
-  if (publishing && !instructions) {
-    errors.push('Instructions are required before publishing.');
-  }
 
-  const isFree = asBoolean(body.isFree, true);
-  const price = asNumber(body.price ?? 0);
-  if (!Number.isFinite(price) || price < 0 || price > 100000) {
-    errors.push('Price must be a number from 0 to 100000.');
+  let saleType = String(body.saleType || '').trim().toLowerCase();
+  if (!['free', 'paid', 'bundle'].includes(saleType)) {
+    saleType = asBoolean(body.isFree, true) ? 'free' : 'paid';
   }
-  if (!isFree && publishing && (!Number.isFinite(price) || price <= 0)) {
-    errors.push('A paid test needs a price greater than 0.');
+  const isFree = saleType === 'free';
+  const price = asNumber(body.price ?? 0);
+  if (saleType === 'paid') {
+    if (!Number.isFinite(price) || price < 0 || price > 100000) {
+      errors.push('Price must be a number from 0 to 100000.');
+    }
+    if (publishing && (!Number.isFinite(price) || price <= 0)) {
+      errors.push('A paid test needs a price greater than 0.');
+    }
   }
 
   const courseId = body.courseId ? String(body.courseId) : '';
@@ -131,14 +134,14 @@ function validateMockTest(body, { publishing = false } = {}) {
       attemptLimit: Number.isInteger(attemptLimit) ? attemptLimit : undefined,
       questionIds,
       questionBankId: questionBankId || null,
+      saleType,
       isFree,
-      price: isFree ? 0 : (Number.isFinite(price) ? price : 0),
+      price: saleType === 'paid' && Number.isFinite(price) ? price : 0,
       courseId: courseId || null,
       availableFrom: availableFrom && availableFrom !== 'invalid' ? availableFrom : null,
       availableUntil: availableUntil && availableUntil !== 'invalid' ? availableUntil : null,
-      // Every test shuffles question order and option order for every attempt — not admin-configurable.
-      shuffleQuestions: true,
-      shuffleOptions: true,
+      shuffleQuestions: false,
+      shuffleOptions: false,
       maxMarks,
     },
   };

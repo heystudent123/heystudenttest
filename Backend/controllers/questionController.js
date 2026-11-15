@@ -76,12 +76,10 @@ exports.updateBank = async (req, res, next) => {
 exports.deleteBank = async (req, res, next) => {
   try {
     if (!isObjectId(req.params.id)) return next(new ErrorResponse('Bank not found.', 404));
-    const questionCount = await Question.countDocuments({ bankId: req.params.id });
-    if (questionCount > 0) {
-      return next(new ErrorResponse('Delete or move every question out of this bank before deleting it.', 409));
-    }
-    const bank = await QuestionBank.findByIdAndDelete(req.params.id);
+    const bank = await QuestionBank.findById(req.params.id);
     if (!bank) return next(new ErrorResponse('Bank not found.', 404));
+    await Question.deleteMany({ bankId: bank._id });
+    await bank.deleteOne();
     res.status(200).json({ success: true, data: {} });
   } catch (err) {
     next(err);

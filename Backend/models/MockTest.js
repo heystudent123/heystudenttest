@@ -23,6 +23,8 @@ const MockTestSchema = new mongoose.Schema({
   positiveMarks: { type: Number, required: true, min: 0, max: 100, default: 1 },
   negativeMarks: { type: Number, required: true, min: 0, max: 100, default: 0 },
   maxMarks: { type: Number, required: true, min: 0, default: 0 },
+  // free = open to all; paid = sold alone; bundle = only via a Bundle inside a Plan
+  saleType: { type: String, enum: ['free', 'paid', 'bundle'], default: 'free' },
   isFree: { type: Boolean, default: true },
   price: { type: Number, default: 0, min: 0 },
   courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', default: null },

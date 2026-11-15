@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Layers, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { coursesApi, mockTestsApi, plansApi } from '../../services/api';
+import { bundlesApi, coursesApi, mockTestsApi, plansApi } from '../../services/api';
 import AdminPageHeader from '../../components/admin/AdminPageHeader';
 
 interface Choice {
@@ -14,6 +14,7 @@ interface PlanRecord {
   description: string;
   price: number;
   status: 'draft' | 'published' | 'unpublished';
+  bundleIds: string[];
   mockTestIds: string[];
   courseIds: string[];
 }
@@ -22,12 +23,19 @@ const empty = {
   title: '',
   description: '',
   price: '',
+  bundleIds: [] as string[],
   mockTestIds: [] as string[],
   courseIds: [] as string[],
 };
 
 function errorMessage(err: any, fallback: string) {
   return err?.response?.data?.error || err?.response?.data?.message || fallback;
+}
+
+function isStandaloneTest(test: { saleType?: string; isFree?: boolean }) {
+  if (test.saleType === 'bundle') return false;
+  if (test.saleType === 'free' || test.saleType === 'paid') return true;
+  return true;
 }
 
 const StatusPill: React.FC<{ status: PlanRecord['status'] }> = ({ status }) => {
@@ -41,6 +49,7 @@ const StatusPill: React.FC<{ status: PlanRecord['status'] }> = ({ status }) => {
 
 const AdminPlansPage: React.FC = () => {
   const [plans, setPlans] = useState<PlanRecord[]>([]);
+  const [bundles, setBundles] = useState<Choice[]>([]);
   const [tests, setTests] = useState<Choice[]>([]);
   const [courses, setCourses] = useState<Choice[]>([]);
   const [form, setForm] = useState(empty);
@@ -53,13 +62,19 @@ const AdminPlansPage: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
 
   const load = async () => {
-    const [planRes, testRes, courseRes] = await Promise.all([
+    const [planRes, bundleRes, testRes, courseRes] = await Promise.all([
       plansApi.list(),
+      bundlesApi.list(),
       mockTestsApi.list({ limit: 50 }),
       coursesApi.getAll({ limit: 100 }),
     ]);
     setPlans(planRes.data || []);
-    setTests((testRes.data || []).map((item: Choice) => ({ _id: item._id, title: item.title })));
+    setBundles((bundleRes.data || []).map((item: Choice) => ({ _id: item._id, title: item.title })));
+    setTests(
+      (testRes.data || [])
+        .filter((item: Choice & { saleType?: string; isFree?: boolean }) => isStandaloneTest(item))
+        .map((item: Choice) => ({ _id: item._id, title: item.title }))
+    );
     setCourses((courseRes.data || []).map((item: Choice) => ({ _id: item._id, title: item.title })));
   };
 
@@ -67,7 +82,7 @@ const AdminPlansPage: React.FC = () => {
     load().catch((err) => setError(errorMessage(err, 'Could not load plans.')));
   }, []);
 
-  const toggle = (key: 'mockTestIds' | 'courseIds', id: string) => {
+  const toggle = (key: 'bundleIds' | 'mockTestIds' | 'courseIds', id: string) => {
     setForm((current) => ({
       ...current,
       [key]: current[key].includes(id) ? current[key].filter((item) => item !== id) : [...current[key], id],
@@ -87,6 +102,7 @@ const AdminPlansPage: React.FC = () => {
       title: plan.title,
       description: plan.description || '',
       price: String(plan.price),
+      bundleIds: (plan.bundleIds || []).map(String),
       mockTestIds: (plan.mockTestIds || []).map(String),
       courseIds: (plan.courseIds || []).map(String),
     });
@@ -101,6 +117,7 @@ const AdminPlansPage: React.FC = () => {
       title: form.title,
       description: form.description,
       price: Number(form.price),
+      bundleIds: form.bundleIds,
       mockTestIds: form.mockTestIds,
       courseIds: form.courseIds,
     };
@@ -150,7 +167,7 @@ const AdminPlansPage: React.FC = () => {
     <div>
       <AdminPageHeader
         title="Plans"
-        description="Bundle mock tests and courses together. Shown to students on both the Courses and Mock Tests pages."
+        description="Attach free/paid mock tests, bundles, and courses. Bundle-only tests are added through a bundle."
         actions={
           <button onClick={openCreate} className="inline-flex items-center gap-1.5 rounded-lg bg-[#111827] px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#1F2937]">
             <Plus size={14} /> New Plan
@@ -164,7 +181,7 @@ const AdminPlansPage: React.FC = () => {
 
         {plans.length === 0 ? (
           <div className="rounded-2xl border border-[#E8EDF4] bg-white py-16 text-center text-[13.5px] text-[#64748B]">
-            No plans yet. Create one to bundle mock tests and courses.
+            No plans yet. Create one to bundle mock tests, bundles, and courses.
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -178,6 +195,7 @@ const AdminPlansPage: React.FC = () => {
                 {plan.description && <p className="mt-1 line-clamp-2 text-[12.5px] text-[#64748B]">{plan.description}</p>}
                 <p className="mt-2 text-[17px] font-extrabold text-[#101828]">₹{plan.price.toLocaleString('en-IN')}</p>
                 <div className="mt-2 flex flex-wrap gap-1.5 text-[11.5px] text-[#64748B]">
+                  <span className="rounded-full bg-[#F1F5F9] px-2 py-0.5">{(plan.bundleIds || []).length} bundle{(plan.bundleIds || []).length === 1 ? '' : 's'}</span>
                   <span className="rounded-full bg-[#F1F5F9] px-2 py-0.5">{(plan.mockTestIds || []).length} mock test{(plan.mockTestIds || []).length === 1 ? '' : 's'}</span>
                   <span className="rounded-full bg-[#F1F5F9] px-2 py-0.5">{(plan.courseIds || []).length} course{(plan.courseIds || []).length === 1 ? '' : 's'}</span>
                 </div>
@@ -201,7 +219,6 @@ const AdminPlansPage: React.FC = () => {
         )}
       </div>
 
-      {/* Create / edit plan */}
       {formOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8"
@@ -231,9 +248,24 @@ const AdminPlansPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Mock tests in this bundle</label>
+                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Bundles</label>
+                <p className="mb-1.5 text-[12px] text-[#94A3B8]">Bundle-only mock tests are selected here as a group.</p>
                 <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-[#E8EDF4] p-3">
-                  {tests.length === 0 && <p className="text-[13px] text-[#94A3B8]">No mock tests yet.</p>}
+                  {bundles.length === 0 && <p className="text-[13px] text-[#94A3B8]">No bundles yet. Create one on Mock Tests → Bundles.</p>}
+                  {bundles.map((bundle) => (
+                    <label key={bundle._id} className="flex items-center gap-2 text-[13.5px] text-[#344054]">
+                      <input type="checkbox" checked={form.bundleIds.includes(bundle._id)} onChange={() => toggle('bundleIds', bundle._id)} className="h-4 w-4 rounded border-[#D0D5DD]" />
+                      {bundle.title}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Free / paid mock tests</label>
+                <p className="mb-1.5 text-[12px] text-[#94A3B8]">Standalone tests only. Bundle-only tests do not appear here.</p>
+                <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-[#E8EDF4] p-3">
+                  {tests.length === 0 && <p className="text-[13px] text-[#94A3B8]">No free or paid mock tests yet.</p>}
                   {tests.map((test) => (
                     <label key={test._id} className="flex items-center gap-2 text-[13.5px] text-[#344054]">
                       <input type="checkbox" checked={form.mockTestIds.includes(test._id)} onChange={() => toggle('mockTestIds', test._id)} className="h-4 w-4 rounded border-[#D0D5DD]" />
@@ -244,7 +276,7 @@ const AdminPlansPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Courses in this bundle</label>
+                <label className="mb-1.5 block text-[13px] font-semibold text-[#344054]">Courses</label>
                 <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-[#E8EDF4] p-3">
                   {courses.length === 0 && <p className="text-[13px] text-[#94A3B8]">No courses yet.</p>}
                   {courses.map((course) => (
@@ -269,7 +301,6 @@ const AdminPlansPage: React.FC = () => {
         </div>
       )}
 
-      {/* Delete confirmation */}
       {confirmDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"

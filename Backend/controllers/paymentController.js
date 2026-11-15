@@ -401,8 +401,9 @@ exports.createOrder = async (req, res, next) => {
         resolvedPurposeModel = 'Plan';
       } else {
         const test = await MockTest.findById(purposeId);
-        if (!test || test.status !== 'published' || test.isFree) {
-          return next(new ErrorResponse('This mock test is not for sale.', 404));
+        const saleType = test?.saleType || (test?.isFree ? 'free' : 'paid');
+        if (!test || test.status !== 'published' || saleType !== 'paid') {
+          return next(new ErrorResponse('This mock test is not for sale on its own.', 404));
         }
         if (!(test.price > 0)) return next(new ErrorResponse('This mock test has no price.', 400));
         finalAmount = test.price;
@@ -571,24 +572,33 @@ exports.verifyPayment = async (req, res, next) => {
       return next(new ErrorResponse('Not authorised to verify this payment', 403));
     }
 
+    // A refunded order must never flip back to "paid" by replaying its old signature.
+    if (payment.status === 'refunded' || payment.status === 'partially_refunded') {
+      return next(new ErrorResponse('This payment was refunded and cannot be verified again', 409));
+    }
+
     // Cryptographically verify signature
     const isValid = verifySignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
     if (!isValid) {
-      payment.status = 'failed';
-      payment.failedAt = new Date();
-      payment.failureReason = 'Signature verification failed';
-      await payment.save();
+      // Only an unpaid order can be failed by a bad signature; a paid one stays paid.
+      if (payment.status === 'created' || payment.status === 'attempted') {
+        payment.status = 'failed';
+        payment.failedAt = new Date();
+        payment.failureReason = 'Signature verification failed';
+        await payment.save();
+      }
       return next(new ErrorResponse('Payment signature verification failed', 400));
     }
 
-    // Mark as paid
-    payment.razorpayPaymentId = razorpayPaymentId;
-    payment.razorpaySignature = razorpaySignature;
-    payment.status = 'paid';
-    payment.paidAt = new Date();
-    await payment.save();
-
-    await applyReferralAttributionForPayment(payment);
+    // Mark as paid (skip the side effects if the webhook already did it)
+    if (payment.status !== 'paid') {
+      payment.razorpayPaymentId = razorpayPaymentId;
+      payment.razorpaySignature = razorpaySignature;
+      payment.status = 'paid';
+      payment.paidAt = new Date();
+      await payment.save();
+      await applyReferralAttributionForPayment(payment);
+    }
     const enrollment = await grantPaidAccess(payment);
 
     res.status(200).json({
@@ -711,13 +721,15 @@ exports.handleWebhook = async (req, res) => {
 // @access  Private
 exports.getMyPayments = async (req, res, next) => {
   try {
-    const { status, purpose, page = 1, limit = 20 } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
 
     const filter = { userId: req.user._id };
-    if (status) filter.status = status;
-    if (purpose) filter.purpose = purpose;
+    // Only plain strings: `?status[$ne]=x` would otherwise become a Mongo operator.
+    if (typeof req.query.status === 'string') filter.status = req.query.status;
+    if (typeof req.query.purpose === 'string') filter.purpose = req.query.purpose;
 
-    const skip = (Number(page) - 1) * Number(limit);
+    const skip = (page - 1) * limit;
 
     const [payments, total] = await Promise.all([
       Payment.find(filter)

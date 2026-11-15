@@ -10,6 +10,7 @@ const PlanSchema = new mongoose.Schema({
     default: 'draft',
   },
   mockTestIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MockTest' }],
+  bundleIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Bundle' }],
   courseIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'EmailUser', required: true },
 }, { timestamps: true });

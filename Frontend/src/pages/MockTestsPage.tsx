@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth as useClerkAuth } from '@clerk/clerk-react';
 import { Helmet } from 'react-helmet-async';
-import { Clock3, FileText, ListChecks, Maximize, Search, ShieldAlert, X } from 'lucide-react';
+import { Clock3, FileText, Info, Layers, ListChecks, Search, ShieldAlert } from 'lucide-react';
 import SharedNavbar from '../components/SharedNavbar';
 import MockTestPayModal from '../components/MockTestPayModal';
-import { emptyReceipt, PaymentPhase, PaymentReceipt } from '../components/PaymentStage';
-import { attemptsApi, authApi, paymentsApi } from '../services/api';
+import PlanBundleInfoModal from '../components/PlanBundleInfoModal';
+import PaymentStage, { emptyReceipt, PaymentPhase, PaymentReceipt } from '../components/PaymentStage';
+import { attemptsApi, paymentsApi } from '../services/api';
 import { CheckoutClosed, loadRazorpayScript, openSecureCheckout, paymentFailureReason } from '../utils/razorpayCheckout';
 import { useAuth } from '../context/AuthContext';
 
@@ -31,6 +32,7 @@ interface ListedTest {
   durationMinutes: number;
   maxMarks: number;
   questionCount: number;
+  saleType?: 'free' | 'paid' | 'bundle';
   isFree: boolean;
   price: number;
   attemptLimit: number;
@@ -40,30 +42,32 @@ interface ListedTest {
   offers: Offer[];
 }
 
+interface PlanBundleCard {
+  _id: string;
+  title: string;
+  description: string;
+  mockTests: { _id: string; title: string; subject: string; durationMinutes: number; questionCount: number }[];
+}
+
+interface PlanCard {
+  _id: string;
+  title: string;
+  description: string;
+  price: number;
+  hasAccess: boolean;
+  testCount: number;
+  courseCount: number;
+  bundles: PlanBundleCard[];
+}
+
 interface CatalogResponse {
   data: ListedTest[];
+  plans?: PlanCard[];
   total: number;
   page: number;
   pages: number;
   checkoutAvailable: boolean;
   progress?: { total: number; unlocked: number; attempted: number };
-}
-
-interface Instructions {
-  title: string;
-  description: string;
-  instructions: string;
-  durationMinutes: number;
-  positiveMarks: number;
-  negativeMarks: number;
-  maxMarks: number;
-  questionCount: number;
-  attemptLimit: number;
-  isFree: boolean;
-  price: number;
-  hasAccess: boolean;
-  checkoutAvailable: boolean;
-  profileMissing: string[];
 }
 
 const TINTS = [
@@ -76,10 +80,6 @@ const TINTS = [
 
 function errorMessage(err: any, fallback: string) {
   return err?.response?.data?.error || err?.response?.data?.message || fallback;
-}
-
-function rupees(amount: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
 }
 
 const ProgressPanel: React.FC<{ total: number; unlocked: number; attempted: number; signedIn: boolean }> = ({ total, unlocked, attempted, signedIn }) => {
@@ -125,7 +125,7 @@ const MockTestsPage: React.FC = () => {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const { user, updateUserProfile } = useAuth();
+  const { user } = useAuth();
   const subject = params.get('subject') || '';
   const query = params.get('q') || '';
   const page = Math.max(1, Number(params.get('page')) || 1);
@@ -136,6 +136,7 @@ const MockTestsPage: React.FC = () => {
   const [subjectTotal, setSubjectTotal] = useState(0);
   const [subjectsError, setSubjectsError] = useState('');
   const [tests, setTests] = useState<ListedTest[]>([]);
+  const [planCards, setPlanCards] = useState<PlanCard[]>([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
   const [checkoutAvailable, setCheckoutAvailable] = useState(false);
@@ -144,15 +145,14 @@ const MockTestsPage: React.FC = () => {
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [active, setActive] = useState<ListedTest | null>(null);
-  const [details, setDetails] = useState<Instructions | null>(null);
   const [detailError, setDetailError] = useState('');
-  const [profile, setProfile] = useState({ name: '', city: '', whatsapp: '' });
-  const [starting, setStarting] = useState(false);
   const [buying, setBuying] = useState(false);
   const [payPhase, setPayPhase] = useState<PaymentPhase>('review');
   const [receipt, setReceipt] = useState<PaymentReceipt>(emptyReceipt);
   const [referralCode, setReferralCode] = useState('');
   const [couponCode, setCouponCode] = useState('');
+  const [planCheckout, setPlanCheckout] = useState<{ id: string; title: string; price: number } | null>(null);
+  const [infoPlan, setInfoPlan] = useState<PlanCard | null>(null);
 
   useEffect(() => {
     setSearchInput(query);
@@ -194,6 +194,7 @@ const MockTestsPage: React.FC = () => {
       .then((response: CatalogResponse) => {
         if (cancelled) return;
         setTests(response.data || []);
+        setPlanCards(response.plans || []);
         setTotal(response.total || 0);
         setPages(response.pages || 1);
         setCheckoutAvailable(Boolean(response.checkoutAvailable));
@@ -216,38 +217,44 @@ const MockTestsPage: React.FC = () => {
     updated.delete('test');
     setParams(updated);
     setActive(null);
-    setDetails(null);
   };
 
   const closeDetails = useCallback(() => {
     setActive(null);
-    setDetails(null);
     const updated = new URLSearchParams(params);
     updated.delete('test');
     setParams(updated, { replace: true });
   }, [params, setParams]);
 
-  const openTest = useCallback(async (test: ListedTest) => {
+  const openTest = useCallback((test: ListedTest) => {
     setDetailError('');
     setPayPhase('review');
-    setActive(test);
-    setDetails(null);
     const updated = new URLSearchParams(params);
     updated.set('test', test._id);
-    setParams(updated, { replace: true });
-    if (!isLoaded) return;
+
+    if (!isLoaded) {
+      setActive(test);
+      setParams(updated, { replace: true });
+      return;
+    }
+
     if (!isSignedIn) {
-      if (!test.isFree && !test.hasAccess) return;
+      if (!test.isFree && !test.hasAccess) {
+        setActive(test);
+        setParams(updated, { replace: true });
+        return;
+      }
       navigate(`/login?redirect=${encodeURIComponent(`/mock-tests?${updated.toString()}`)}`);
       return;
     }
-    if (!test.isFree && !test.hasAccess) return;
-    try {
-      const response = await attemptsApi.instructions(test._id);
-      setDetails(response.data);
-    } catch (err) {
-      setDetailError(errorMessage(err, 'Could not open this test.'));
+
+    if (!test.isFree && !test.hasAccess) {
+      setActive(test);
+      setParams(updated, { replace: true });
+      return;
     }
+
+    navigate(`/mock-tests/${test._id}/instructions`);
   }, [isLoaded, isSignedIn, navigate, params, setParams]);
 
   useEffect(() => {
@@ -257,17 +264,18 @@ const MockTestsPage: React.FC = () => {
     openTest(match);
   }, [openId, isLoaded, loading, tests, active, openTest]);
 
-  const buy = async (purpose: 'plan' | 'mock_test', id: string, title: string) => {
+  const buy = async (purpose: 'plan' | 'mock_test', id: string, title: string, amountHint = 0) => {
     if (!isSignedIn) {
       const updated = new URLSearchParams(params);
       if (active) updated.set('test', active._id);
       navigate(`/login?redirect=${encodeURIComponent(`/mock-tests?${updated.toString()}`)}`);
       return;
     }
+    if (purpose === 'plan') setPlanCheckout({ id, title, price: amountHint });
     setBuying(true);
     setDetailError('');
     setPayPhase('processing');
-    setReceipt({ title, amount: active?.price || 0, orderId: '', reason: '' });
+    setReceipt({ title, amount: amountHint || active?.price || 0, orderId: '', reason: '' });
     let orderId = '';
     try {
       const loaded = await loadRazorpayScript();
@@ -282,7 +290,7 @@ const MockTestsPage: React.FC = () => {
       });
       const order = orderRes.data;
       orderId = order.orderId;
-      setReceipt({ title, amount: order.finalAmountInRupees || active?.price || 0, orderId, reason: '' });
+      setReceipt({ title, amount: order.finalAmountInRupees || amountHint || active?.price || 0, orderId, reason: '' });
       await openSecureCheckout({
         orderId,
         amount: order.amount,
@@ -296,40 +304,13 @@ const MockTestsPage: React.FC = () => {
       if (!orderId && !(err instanceof CheckoutClosed)) {
         setPayPhase('review');
         setDetailError(paymentFailureReason(err));
+        if (purpose === 'plan') setPlanCheckout(null);
         return;
       }
       setReceipt((current) => ({ ...current, orderId: orderId || current.orderId, reason: paymentFailureReason(err) }));
       setPayPhase('failed');
     } finally {
       setBuying(false);
-    }
-  };
-
-  const start = async () => {
-    if (!active || !details?.hasAccess) return;
-    setStarting(true);
-    setDetailError('');
-    try {
-      if (details.profileMissing?.length) {
-        await authApi.updateProfile('', profile);
-        await updateUserProfile(profile);
-      }
-      const root = document.documentElement;
-      if (root.requestFullscreen) await root.requestFullscreen();
-      if (active.inProgressAttemptId) {
-        navigate(`/mock-tests/attempt/${active.inProgressAttemptId}`);
-        return;
-      }
-      const response = await attemptsApi.start(active._id);
-      navigate(`/mock-tests/attempt/${response.data._id}`);
-    } catch (err: any) {
-      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
-      const code = err?.response?.data?.code;
-      if (code === 'PROFILE_INCOMPLETE') setDetailError('Enter your name, city, and a 10-digit WhatsApp number.');
-      else if (code === 'CHECKOUT_UNAVAILABLE') setDetailError(errorMessage(err, 'This test is still locked.'));
-      else setDetailError(errorMessage(err, 'The test could not start. Allow full screen and try again.'));
-    } finally {
-      setStarting(false);
     }
   };
 
@@ -415,48 +396,92 @@ const MockTestsPage: React.FC = () => {
             <div className="mt-5 space-y-3">
               {[0, 1, 2, 3].map((key) => <div key={key} className="h-[92px] animate-pulse rounded-2xl bg-[#F4F6FB]" />)}
             </div>
-          ) : tests.length === 0 ? (
+          ) : planCards.length === 0 && tests.length === 0 ? (
             <div className="mt-5 rounded-2xl border border-dashed border-[#E4E7EC] bg-white px-6 py-12 text-center text-[14px] text-[#64748B]">
               No published mock tests match this search.
             </div>
           ) : (
-            <ul className="mt-5 space-y-3">
+            <div className="mt-5 space-y-3">
+              {planCards.map((plan) => (
+                <article key={plan._id} className="flex flex-col gap-4 rounded-2xl border border-[#E8EDF4] bg-white p-4 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:flex-row sm:items-center">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#EEF1FF] text-[#3267f5]">
+                    <Layers size={20} />
+                  </span>
+                  <div className="min-w-0 flex-1 text-left">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[16px] font-bold text-[#101828]">{plan.title}</p>
+                      <span className="rounded-full bg-[#EEF1FF] px-2 py-0.5 text-[11px] font-semibold text-[#3267f5]">Plan</span>
+                      {plan.hasAccess && (
+                        <span className="rounded-full bg-[#E7F8EF] px-2 py-0.5 text-[11px] font-semibold text-[#1F8A4C]">Unlocked</span>
+                      )}
+                    </div>
+                    {plan.description && <p className="mt-1 line-clamp-2 text-[13px] text-[#64748B]">{plan.description}</p>}
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[#64748B]">
+                      <span className="inline-flex items-center gap-1"><ListChecks size={13} /> {plan.testCount} mock tests</span>
+                      <span className="font-semibold text-[#101828]">₹{plan.price.toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {!plan.hasAccess && (
+                      <button
+                        type="button"
+                        disabled={buying || !checkoutAvailable}
+                        onClick={() => {
+                          setActive(null);
+                          buy('plan', plan._id, plan.title, plan.price);
+                        }}
+                        className="inline-flex items-center justify-center rounded-md bg-[#111827] px-4 py-2.5 text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#D0D5DD]"
+                      >
+                        {buying ? 'Opening…' : 'Buy plan'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setInfoPlan(plan)}
+                      aria-label="More info"
+                      title="More info"
+                      className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-md border border-[#E4E7EC] bg-white text-[#344054] hover:bg-[#F7F9FC]"
+                    >
+                      <Info size={16} />
+                    </button>
+                  </div>
+                </article>
+              ))}
+
               {tests.map((test, index) => {
                 const locked = !test.isFree && !test.hasAccess;
                 const disabled = !locked && !attemptsLeft(test);
                 return (
-                  <li key={test._id}>
-                    <article className="flex flex-col gap-4 rounded-2xl border border-[#E8EDF4] bg-white p-4 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:flex-row sm:items-center">
-                      <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${TINTS[index % TINTS.length]}`}>
-                        <FileText size={20} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-[16px] font-bold text-[#101828]">{test.title}</p>
-                          {test.isFree && (
-                            <span className="rounded-full bg-[#E7F8EF] px-2 py-0.5 text-[11px] font-semibold text-[#1F8A4C]">Free</span>
-                          )}
-                        </div>
-                        <p className="mt-1 text-[13px] text-[#64748B]">{test.subject}</p>
-                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[#64748B]">
-                          <span className="inline-flex items-center gap-1"><ListChecks size={13} /> {test.questionCount} questions</span>
-                          <span className="inline-flex items-center gap-1"><Clock3 size={13} /> {test.durationMinutes} min</span>
-                          {test.maxMarks > 0 && <span>{test.maxMarks} marks</span>}
-                        </div>
+                  <article key={test._id} className="flex flex-col gap-4 rounded-2xl border border-[#E8EDF4] bg-white p-4 text-left shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:flex-row sm:items-center">
+                    <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${TINTS[index % TINTS.length]}`}>
+                      <FileText size={20} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-[16px] font-bold text-[#101828]">{test.title}</p>
+                        {test.isFree && (
+                          <span className="rounded-full bg-[#E7F8EF] px-2 py-0.5 text-[11px] font-semibold text-[#1F8A4C]">Free</span>
+                        )}
                       </div>
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => openTest(test)}
-                        className="inline-flex shrink-0 items-center justify-center rounded-md bg-[#111827] px-4 py-2.5 text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#D0D5DD]"
-                      >
-                        {buttonLabel(test)}
-                      </button>
-                    </article>
-                  </li>
+                      <p className="mt-1 text-[13px] text-[#64748B]">{test.subject}</p>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-[#64748B]">
+                        <span className="inline-flex items-center gap-1"><ListChecks size={13} /> {test.questionCount} questions</span>
+                        <span className="inline-flex items-center gap-1"><Clock3 size={13} /> {test.durationMinutes} min</span>
+                        {test.maxMarks > 0 && <span>{test.maxMarks} marks</span>}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => openTest(test)}
+                      className="inline-flex shrink-0 items-center justify-center rounded-md bg-[#111827] px-4 py-2.5 text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#D0D5DD]"
+                    >
+                      {buttonLabel(test)}
+                    </button>
+                  </article>
                 );
               })}
-            </ul>
+            </div>
           )}
 
           {pages > 1 && (
@@ -481,50 +506,35 @@ const MockTestsPage: React.FC = () => {
               receipt={receipt}
               onClose={closeDetails}
               onBack={() => { setPayPhase('review'); setDetailError(''); }}
-              onContinue={() => { setPayPhase('review'); setActive(null); setDetails(null); setReloadKey((value) => value + 1); }}
-              onBuy={buy}
+              onContinue={() => { setPayPhase('review'); setActive(null); setReloadKey((value) => value + 1); }}
+              onBuy={(purpose, id, title) => buy(purpose, id, title, purpose === 'mock_test' ? active.price : 0)}
             />
           )}
-          {active && (active.isFree || active.hasAccess) && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8"
-              onClick={(e) => { if (e.target === e.currentTarget) closeDetails(); }}
-            >
-              <section className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[#E8EDF4] bg-white p-5 text-left shadow-2xl sm:p-6">
-                <button type="button" onClick={closeDetails} aria-label="Close" className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-[#94A3B8] transition-colors hover:bg-[#F1F5F9] hover:text-[#101828]">
-                  <X size={18} />
-                </button>
-                <p className="pr-8 text-[20px] font-bold text-[#101828]">{active.title}</p>
-                {details ? (
-                  <div className="mt-3">
-                    <div className="flex flex-wrap gap-3 text-[13px] text-[#64748B]">
-                      <span>{details.questionCount} questions</span>
-                      <span>{details.durationMinutes} min</span>
-                      {details.maxMarks > 0 && <span>{details.maxMarks} marks</span>}
-                      <span>+{details.positiveMarks} / −{details.negativeMarks}</span>
-                    </div>
-                    {details.instructions && (
-                      <p className="mt-3 whitespace-pre-wrap text-[14px] leading-relaxed text-[#475569]">
-                        <Maximize size={14} className="mb-0.5 mr-1 inline" />{details.instructions}
-                      </p>
-                    )}
-                    {details.profileMissing.length > 0 && (
-                      <div className="mt-4 grid gap-2 rounded-xl bg-[#F8FAFC] p-4">
-                        <p className="text-[14px] font-semibold text-[#101828]">Finish your profile to start</p>
-                        {details.profileMissing.includes('name') && <input aria-label="Full name" placeholder="Full name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} className="rounded-md border border-[#E4E7EC] px-3 py-2 text-[14px] outline-none focus:border-[#3267f5]" />}
-                        {details.profileMissing.includes('city') && <input aria-label="City" placeholder="City" value={profile.city} onChange={(event) => setProfile({ ...profile, city: event.target.value })} className="rounded-md border border-[#E4E7EC] px-3 py-2 text-[14px] outline-none focus:border-[#3267f5]" />}
-                        {details.profileMissing.includes('whatsapp') && <input aria-label="WhatsApp number" placeholder="10-digit WhatsApp number" value={profile.whatsapp} onChange={(event) => setProfile({ ...profile, whatsapp: event.target.value })} className="rounded-md border border-[#E4E7EC] px-3 py-2 text-[14px] outline-none focus:border-[#3267f5]" />}
-                      </div>
-                    )}
-                    <button type="button" disabled={starting || !attemptsLeft(active)} onClick={start} className="mt-4 rounded-md bg-[#111827] px-5 py-2.5 text-[14px] font-semibold text-white disabled:bg-[#D0D5DD]">
-                      {starting ? 'Opening…' : active.inProgressAttemptId ? 'Resume test' : 'Start test in full screen'}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-[14px] text-[#64748B]">{detailError || 'Loading test details…'}</p>
-                )}
-                {detailError && active.hasAccess && <p role="alert" className="mt-3 text-[14px] text-[#B42318]">{detailError}</p>}
-              </section>
+          {infoPlan && (
+            <PlanBundleInfoModal
+              plan={infoPlan}
+              onClose={() => setInfoPlan(null)}
+              buying={buying}
+              checkoutAvailable={checkoutAvailable}
+              onBuy={infoPlan.hasAccess ? undefined : () => {
+                const plan = infoPlan;
+                setInfoPlan(null);
+                setActive(null);
+                buy('plan', plan._id, plan.title, plan.price);
+              }}
+            />
+          )}
+          {planCheckout && payPhase !== 'review' && !active && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8">
+              <div className="w-full max-w-xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+                <PaymentStage
+                  phase={payPhase === 'processing' ? 'processing' : payPhase === 'paid' ? 'paid' : 'failed'}
+                  receipt={receipt}
+                  onRetry={() => buy('plan', planCheckout.id, planCheckout.title, planCheckout.price)}
+                  onBack={() => { setPayPhase('review'); setPlanCheckout(null); setDetailError(''); }}
+                  onContinue={() => { setPayPhase('review'); setPlanCheckout(null); setReloadKey((value) => value + 1); }}
+                />
+              </div>
             </div>
           )}
         </main>

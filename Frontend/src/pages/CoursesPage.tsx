@@ -633,16 +633,17 @@ const CoursesPage: React.FC = () => {
               No courses available right now. Check back soon.
             </div>
           ) : (
-            <div className="grid items-start gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="-mx-6 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-6 pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:grid lg:grid-cols-3 lg:gap-6 lg:overflow-visible lg:px-0 lg:pb-0">
               {courses.map((course, idx) => (
-                <CourseCard
-                  key={course._id}
-                  course={course}
-                  tint={CARD_TINTS[idx % CARD_TINTS.length]}
-                  isPopular={idx === 0}
-                  isEnrolled={enrolledCourseIds.has(course._id)}
-                  onEnroll={() => handleEnrollClick(course)}
-                />
+                <div key={course._id} className="w-[85%] shrink-0 snap-start sm:w-[46%] lg:w-auto">
+                  <CourseCard
+                    course={course}
+                    tint={CARD_TINTS[idx % CARD_TINTS.length]}
+                    isPopular={idx === 0}
+                    isEnrolled={enrolledCourseIds.has(course._id)}
+                    onEnroll={() => handleEnrollClick(course)}
+                  />
+                </div>
               ))}
             </div>
           )}
@@ -683,11 +684,11 @@ const CoursesPage: React.FC = () => {
               </label>
             </div>
             {planPayError && <p role="alert" className="mx-auto mt-3 max-w-2xl rounded-lg border border-[#F3D0D0] bg-[#FFF6F6] px-3 py-2.5 text-left text-[13px] leading-relaxed text-[#B42318]">{planPayError}</p>}
-            <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="-mx-6 mt-6 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-6 pb-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:mx-0 lg:grid lg:grid-cols-3 lg:gap-6 lg:overflow-visible lg:px-0 lg:pb-0">
               {plans.map((plan) => {
                 const expanded = expandedPlanId === plan._id;
                 return (
-                  <div key={plan._id} className="flex flex-col rounded-[22px] border border-[#E8EDF4] bg-white p-6">
+                  <div key={plan._id} className="flex w-[85%] shrink-0 snap-start flex-col rounded-[22px] border border-[#E8EDF4] bg-white p-6 sm:w-[46%] lg:w-auto">
                     <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F3EEFF] text-[#9B8AF5]"><Layers size={18} /></span>
                     <h3 className="mt-4 text-[17px] font-extrabold text-[#101828]">{plan.title}</h3>
                     {plan.description && <p className="mt-1.5 text-[13.5px] leading-relaxed text-[#64748B]">{plan.description}</p>}
