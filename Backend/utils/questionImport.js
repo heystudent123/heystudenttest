@@ -43,6 +43,25 @@ function cleanText(value, maxLen) {
   return String(sanitized || '').slice(0, maxLen);
 }
 
+// Question and option text keep the admin's line breaks (Alt+Enter in an Excel
+// cell) so "List I / List II" style questions stay readable. Spaces inside a
+// line are still collapsed, and at most one blank line is kept. Hashing uses
+// normalize() instead, so formatting never creates a false "new" question.
+const LINE_BREAKS = new RegExp('\r\n|\r|\u2028|\u2029|\u0085', 'g');
+const INLINE_SPACE = new RegExp('[ \t\u00A0]+', 'g');
+
+function cleanMultiline(value, maxLen) {
+  const text = String(value ?? '')
+    .replace(LINE_BREAKS, '\n')
+    .replace(/[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(INLINE_SPACE, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return String(sanitizeStr(text) || '').slice(0, maxLen);
+}
+
 function stemHash(question, options) {
   const payload = [normalize(question).toLowerCase(), ...options.map((option) => normalize(option).toLowerCase())].join('\n');
   return crypto.createHash('sha256').update(payload).digest('hex');
@@ -103,6 +122,22 @@ function isEmptyRow(row) {
   return HEADERS.every((_, index) => normalize(row[index]) === '');
 }
 
+const TEXT_FIELDS = ['question', 'optionA', 'optionB', 'optionC', 'optionD'];
+const countBreaks = (text) => String(text || '').split(String.fromCharCode(10)).length - 1;
+
+// True when the new text has more line breaks than the stored text in at least one field,
+// and never fewer in any. Never lets a flatter upload overwrite better formatting.
+function restoresLineBreaks(stored, next) {
+  let gained = false;
+  for (const field of TEXT_FIELDS) {
+    const before = countBreaks(stored[field]);
+    const after = countBreaks(next[field]);
+    if (after < before) return false;
+    if (after > before) gained = true;
+  }
+  return gained;
+}
+
 /**
  * Parse and validate an Excel buffer.
  * existingStemHashes: Set of stemHash already stored in the question bank.
@@ -111,6 +146,7 @@ function isEmptyRow(row) {
 function parseQuestionWorkbook(buffer, existing = {}) {
   const existingStem = existing.stemHashes || new Set();
   const existingContent = existing.contentHashes || new Set();
+  const existingByHash = existing.byHash || new Map();
 
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     return { fatal: 'Upload an .xlsx file. The file is empty.' };
@@ -143,6 +179,7 @@ function parseQuestionWorkbook(buffer, existing = {}) {
 
   const valid = [];
   const invalid = [];
+  const updates = [];
   const seenContent = new Map();
   const seenStem = new Map();
   let skippedEmpty = 0;
@@ -154,11 +191,11 @@ function parseQuestionWorkbook(buffer, existing = {}) {
       return;
     }
 
-    const question = cleanText(row[0], MAX_QUESTION_LEN);
-    const optionA = cleanText(row[1], MAX_OPTION_LEN);
-    const optionB = cleanText(row[2], MAX_OPTION_LEN);
-    const optionC = cleanText(row[3], MAX_OPTION_LEN);
-    const optionD = cleanText(row[4], MAX_OPTION_LEN);
+    const question = cleanMultiline(row[0], MAX_QUESTION_LEN);
+    const optionA = cleanMultiline(row[1], MAX_OPTION_LEN);
+    const optionB = cleanMultiline(row[2], MAX_OPTION_LEN);
+    const optionC = cleanMultiline(row[3], MAX_OPTION_LEN);
+    const optionD = cleanMultiline(row[4], MAX_OPTION_LEN);
     const correctRaw = normalize(row[5]).toUpperCase();
     const chapter = cleanText(row[6], MAX_CHAPTER_LEN);
     const remarks = cleanText(row[7], MAX_REMARKS_LEN);
@@ -185,8 +222,16 @@ function parseQuestionWorkbook(buffer, existing = {}) {
     if (stem && seenStem.has(stem) && !seenContent.has(hash)) {
       errors.push(`Same question and options as row ${seenStem.get(stem)}, with a different correct answer. Keep one row.`);
     }
+    let formattingUpdate = false;
     if (hash && existingContent.has(hash)) {
-      errors.push('This exact question is already in the question bank and will not be imported again.');
+      // Same question already stored. If this upload carries line breaks the stored copy lost,
+      // treat it as a formatting update instead of a rejected duplicate.
+      const stored = existingByHash.get(hash);
+      if (stored && restoresLineBreaks(stored, { question, optionA, optionB, optionC, optionD })) {
+        formattingUpdate = true;
+      } else {
+        errors.push('This exact question is already in the question bank and will not be imported again.');
+      }
     } else if (stem && existingStem.has(stem)) {
       errors.push('The question bank already has this question with a different correct answer. Edit that question instead of importing a second copy.');
     }
@@ -210,6 +255,10 @@ function parseQuestionWorkbook(buffer, existing = {}) {
 
     seenContent.set(hash, rowNumber);
     seenStem.set(stem, rowNumber);
+    if (formattingUpdate) {
+      updates.push({ ...preview, contentHash: hash, stemHash: stem });
+      return;
+    }
     valid.push({
       ...preview,
       contentHash: hash,
@@ -223,6 +272,7 @@ function parseQuestionWorkbook(buffer, existing = {}) {
     skippedEmpty,
     valid,
     invalid,
+    updates,
   };
 }
 
@@ -270,6 +320,8 @@ module.exports = {
   EXAMPLE_ROW,
   stemHash,
   contentHash,
+  cleanMultiline,
+  restoresLineBreaks,
   parseQuestionWorkbook,
   buildTemplateBuffer,
   buildErrorReportBuffer,

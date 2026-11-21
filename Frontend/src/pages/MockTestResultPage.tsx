@@ -345,13 +345,13 @@ const MockTestResultPage: React.FC = () => {
                           {style.icon} {style.label} · {item.marksAwarded > 0 ? '+' : ''}{item.marksAwarded}
                         </span>
                       </div>
-                      <p className="mt-2 text-[14px] font-semibold leading-relaxed text-[#101828]">{item.question}</p>
+                      <p className="mt-2 whitespace-pre-wrap text-[14px] font-semibold leading-relaxed text-[#101828]">{item.question}</p>
                       <div className="mt-3 grid gap-2 text-[13px] sm:grid-cols-2">
-                        <p className={`rounded-lg px-3 py-2 ${item.outcome === 'incorrect' ? 'bg-[#FBEFEE] text-[#B3443A]' : item.outcome === 'unanswered' ? 'bg-[#F7F9FC] text-[#64748B]' : 'bg-[#F0FBF4] text-[#2A7D46]'}`}>
+                        <p className={`whitespace-pre-wrap rounded-lg px-3 py-2 ${item.outcome === 'incorrect' ? 'bg-[#FBEFEE] text-[#B3443A]' : item.outcome === 'unanswered' ? 'bg-[#F7F9FC] text-[#64748B]' : 'bg-[#F0FBF4] text-[#2A7D46]'}`}>
                           <span className="font-semibold">Your answer:</span> {optionText(item, item.selected)}
                         </p>
                         {item.outcome !== 'correct' && (
-                          <p className="rounded-lg bg-[#F0FBF4] px-3 py-2 text-[#2A7D46]">
+                          <p className="whitespace-pre-wrap rounded-lg bg-[#F0FBF4] px-3 py-2 text-[#2A7D46]">
                             <span className="font-semibold">Correct answer:</span> {optionText(item, item.correctAnswer)}
                           </p>
                         )}

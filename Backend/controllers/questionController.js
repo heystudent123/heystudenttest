@@ -10,6 +10,7 @@ const {
   buildErrorReportBuffer,
   contentHash,
   stemHash,
+  cleanMultiline,
 } = require('../utils/questionImport');
 
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -108,13 +109,14 @@ exports.previewImport = async (req, res, next) => {
     const hashes = preliminary.valid.map((row) => row.contentHash);
     const stems = preliminary.valid.map((row) => row.stemHash);
     const [exactMatches, stemMatches] = await Promise.all([
-      hashes.length ? Question.find({ contentHash: { $in: hashes } }).select('contentHash').lean() : [],
+      hashes.length ? Question.find({ contentHash: { $in: hashes } }).select('contentHash question optionA optionB optionC optionD').lean() : [],
       stems.length ? Question.find({ stemHash: { $in: stems } }).select('stemHash').lean() : [],
     ]);
 
     const reviewed = parseQuestionWorkbook(req.file.buffer, {
       contentHashes: new Set(exactMatches.map((item) => item.contentHash)),
       stemHashes: new Set(stemMatches.map((item) => item.stemHash)),
+      byHash: new Map(exactMatches.map((item) => [item.contentHash, item])),
     });
     if (reviewed.fatal) {
       return next(new ErrorResponse(reviewed.fatal, 400));
@@ -126,8 +128,9 @@ exports.previewImport = async (req, res, next) => {
       fileName: sanitizeStr(req.file.originalname || '').slice(0, 200),
       validRows: reviewed.valid,
       invalidRows: reviewed.invalid,
+      updateRows: reviewed.updates,
       skippedEmpty: reviewed.skippedEmpty,
-      result: { inserted: 0, skippedDuplicates: reviewed.invalid.length, rejected: reviewed.invalid.length },
+      result: { inserted: 0, skippedDuplicates: reviewed.invalid.length, rejected: reviewed.invalid.length, updated: 0 },
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
 
@@ -138,9 +141,11 @@ exports.previewImport = async (req, res, next) => {
         fileName: record.fileName,
         validCount: reviewed.valid.length,
         invalidCount: reviewed.invalid.length,
+        updateCount: reviewed.updates.length,
         skippedEmpty: reviewed.skippedEmpty,
         valid: reviewed.valid,
         invalid: reviewed.invalid,
+        updates: reviewed.updates,
       },
     });
   } catch (err) {
@@ -180,11 +185,11 @@ exports.approveImport = async (req, res, next) => {
       return next(new ErrorResponse('This import is already being saved. Retry in a moment.', 409));
     }
 
-    if (!claimed.validRows.length) {
+    if (!claimed.validRows.length && !(claimed.updateRows || []).length) {
       claimed.status = 'pending';
       claimed.approvedBy = undefined;
       await claimed.save();
-      return next(new ErrorResponse('No valid questions to import. Fix the spreadsheet and upload it again.', 400));
+      return next(new ErrorResponse('Nothing to import or update. Fix the spreadsheet and upload it again.', 400));
     }
 
     const docs = claimed.validRows.map((row) => ({
@@ -218,12 +223,54 @@ exports.approveImport = async (req, res, next) => {
     const inserted = Math.max(0, after - before);
     const skippedDuplicates = docs.length - inserted;
 
+    // Formatting-only updates: a re-upload carrying line breaks the stored copy lost.
+    // Same content hash means same question and same correct answer, so this is cosmetic.
+    // Published tests hold a frozen copy of each question, so refresh that text too.
+    let updated = 0;
+    let refreshedTests = 0;
+    const updateRows = claimed.updateRows || [];
+    if (updateRows.length) {
+      const stored = await Question.find({ contentHash: { $in: updateRows.map((row) => row.contentHash) } }).select("_id contentHash").lean();
+      const idByHash = new Map(stored.map((item) => [item.contentHash, item._id]));
+      const questionOps = [];
+      const testOps = [];
+      const touchedIds = [];
+      updateRows.forEach((row) => {
+        const id = idByHash.get(row.contentHash);
+        if (!id) return;
+        const text = { question: row.question, optionA: row.optionA, optionB: row.optionB, optionC: row.optionC, optionD: row.optionD };
+        touchedIds.push(id);
+        questionOps.push({ updateOne: { filter: { _id: id }, update: { $set: text } } });
+        testOps.push({
+          updateMany: {
+            filter: { "publishedSnapshot.questionId": id },
+            update: { $set: {
+              "publishedSnapshot.$[e].question": text.question,
+              "publishedSnapshot.$[e].optionA": text.optionA,
+              "publishedSnapshot.$[e].optionB": text.optionB,
+              "publishedSnapshot.$[e].optionC": text.optionC,
+              "publishedSnapshot.$[e].optionD": text.optionD,
+            } },
+            arrayFilters: [{ "e.questionId": id }],
+          },
+        });
+      });
+      if (questionOps.length) {
+        refreshedTests = await MockTest.countDocuments({ "publishedSnapshot.questionId": { $in: touchedIds } });
+        const questionResult = await Question.bulkWrite(questionOps, { ordered: false });
+        updated = questionResult.modifiedCount || 0;
+        await MockTest.bulkWrite(testOps, { ordered: false });
+      }
+    }
+
     claimed.status = 'imported';
     claimed.expiresAt = undefined;
     claimed.result = {
       inserted,
       skippedDuplicates,
       rejected: claimed.invalidRows.length,
+      updated,
+      refreshedTests,
     };
     await claimed.save();
 
@@ -233,6 +280,8 @@ exports.approveImport = async (req, res, next) => {
         inserted,
         skippedDuplicates,
         rejected: claimed.invalidRows.length,
+        updated,
+        refreshedTests,
         alreadyImported: false,
       },
     });
@@ -320,11 +369,11 @@ exports.createQuestion = async (req, res, next) => {
     const bank = await QuestionBank.findById(bankId).select('_id');
     if (!bank) return next(new ErrorResponse('Question bank not found.', 404));
 
-    const question = sanitizeStr(req.body.question || '').slice(0, 4000);
-    const optionA = sanitizeStr(req.body.optionA || '').slice(0, 1000);
-    const optionB = sanitizeStr(req.body.optionB || '').slice(0, 1000);
-    const optionC = sanitizeStr(req.body.optionC || '').slice(0, 1000);
-    const optionD = sanitizeStr(req.body.optionD || '').slice(0, 1000);
+    const question = cleanMultiline(req.body.question || '', 4000);
+    const optionA = cleanMultiline(req.body.optionA || '', 1000);
+    const optionB = cleanMultiline(req.body.optionB || '', 1000);
+    const optionC = cleanMultiline(req.body.optionC || '', 1000);
+    const optionD = cleanMultiline(req.body.optionD || '', 1000);
     const correctAnswer = String(req.body.correctAnswer || '').trim().toUpperCase();
     const chapter = sanitizeStr(req.body.chapter || '').slice(0, 200);
     const remarks = sanitizeStr(req.body.remarks || '').slice(0, 2000);
@@ -368,11 +417,11 @@ exports.updateQuestion = async (req, res, next) => {
     const question = await Question.findById(req.params.id);
     if (!question) return next(new ErrorResponse('Question not found.', 404));
 
-    const nextQuestion = sanitizeStr(req.body.question ?? question.question).slice(0, 4000);
-    const optionA = sanitizeStr(req.body.optionA ?? question.optionA).slice(0, 1000);
-    const optionB = sanitizeStr(req.body.optionB ?? question.optionB).slice(0, 1000);
-    const optionC = sanitizeStr(req.body.optionC ?? question.optionC).slice(0, 1000);
-    const optionD = sanitizeStr(req.body.optionD ?? question.optionD).slice(0, 1000);
+    const nextQuestion = cleanMultiline(req.body.question ?? question.question, 4000);
+    const optionA = cleanMultiline(req.body.optionA ?? question.optionA, 1000);
+    const optionB = cleanMultiline(req.body.optionB ?? question.optionB, 1000);
+    const optionC = cleanMultiline(req.body.optionC ?? question.optionC, 1000);
+    const optionD = cleanMultiline(req.body.optionD ?? question.optionD, 1000);
     const correctAnswer = String(req.body.correctAnswer ?? question.correctAnswer).trim().toUpperCase();
     const chapter = sanitizeStr(req.body.chapter ?? question.chapter).slice(0, 200);
     const remarks = sanitizeStr(req.body.remarks ?? question.remarks).slice(0, 2000);

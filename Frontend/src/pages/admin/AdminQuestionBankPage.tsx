@@ -41,9 +41,11 @@ interface Preview {
   fileName: string;
   validCount: number;
   invalidCount: number;
+  updateCount?: number;
   skippedEmpty: number;
   valid: PreviewRow[];
   invalid: PreviewRow[];
+  updates?: PreviewRow[];
 }
 
 const emptyQuestionForm = {
@@ -275,7 +277,7 @@ const AdminQuestionBankPage: React.FC = () => {
       setNotice(
         result.alreadyImported
           ? `This file was already imported. ${result.inserted} question(s) were saved.`
-          : `Imported ${result.inserted} question(s). Skipped ${result.skippedDuplicates} duplicate(s). Rejected ${result.rejected} row(s).`
+          : `Imported ${result.inserted} question(s)${result.updated ? `, restored line breaks on ${result.updated} existing question(s)${result.refreshedTests ? ` (${result.refreshedTests} published test(s) refreshed)` : ''}` : ''}. Skipped ${result.skippedDuplicates} duplicate(s). Rejected ${result.rejected} row(s).`
       );
       setPreview(null);
       setImportOpen(false);
@@ -731,7 +733,7 @@ const AdminQuestionBankPage: React.FC = () => {
               <div className="mt-6">
                 <p className="text-[13.5px] text-[#475569]">
                   {preview.fileName ? `${preview.fileName}: ` : ''}
-                  {preview.validCount} ready, {preview.invalidCount} rejected
+                  {preview.validCount} ready, {(preview.updateCount || 0) > 0 ? `${preview.updateCount} to update, ` : ""}{preview.invalidCount} rejected
                   {preview.skippedEmpty ? `, ${preview.skippedEmpty} empty row(s) ignored` : ''}.
                 </p>
                 {preview.invalidCount > 0 && (
@@ -762,16 +764,25 @@ const AdminQuestionBankPage: React.FC = () => {
                         <tr key={`bad-${row.rowNumber}`} className="border-t border-red-100 bg-red-50">
                           <td className="px-3 py-2">{row.rowNumber}</td>
                           <td className="px-3 py-2 text-red-800">{row.errors?.join(' ')}</td>
-                          <td className="px-3 py-2">{row.question || '—'}</td>
+                          <td className="whitespace-pre-wrap px-3 py-2">{row.question || '—'}</td>
                           <td className="px-3 py-2">{row.correctAnswer || '—'}</td>
                           <td className="px-3 py-2">{row.chapter || '—'}</td>
+                        </tr>
+                      ))}
+                      {(preview.updates || []).map((row) => (
+                        <tr key={`up-${row.rowNumber}`} className="border-t border-[#DCE6FF] bg-[#F4F7FF]">
+                          <td className="px-3 py-2">{row.rowNumber}</td>
+                          <td className="px-3 py-2 text-[#3267f5]">Already in bank. Line breaks will be restored</td>
+                          <td className="whitespace-pre-wrap px-3 py-2">{row.question}</td>
+                          <td className="px-3 py-2">{row.correctAnswer}</td>
+                          <td className="px-3 py-2">{row.chapter || "—"}</td>
                         </tr>
                       ))}
                       {preview.valid.map((row) => (
                         <tr key={`ok-${row.rowNumber}`} className="border-t border-[#F1F5F9]">
                           <td className="px-3 py-2">{row.rowNumber}</td>
                           <td className="px-3 py-2 text-green-700">Ready</td>
-                          <td className="px-3 py-2">{row.question}</td>
+                          <td className="whitespace-pre-wrap px-3 py-2">{row.question}</td>
                           <td className="px-3 py-2">{row.correctAnswer}</td>
                           <td className="px-3 py-2">{row.chapter || '—'}</td>
                         </tr>
@@ -781,11 +792,11 @@ const AdminQuestionBankPage: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  disabled={approving || preview.validCount === 0}
+                  disabled={approving || preview.validCount + (preview.updateCount || 0) === 0}
                   onClick={onApprove}
                   className="mt-4 rounded-lg bg-[#111827] px-4 py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#1F2937] disabled:opacity-50"
                 >
-                  {approving ? 'Saving…' : `Approve ${preview.validCount} question(s)`}
+                  {approving ? 'Saving…' : `Approve ${preview.validCount} new${(preview.updateCount || 0) > 0 ? ` + ${preview.updateCount} update(s)` : ''}`}
                 </button>
               </div>
             )}

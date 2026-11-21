@@ -380,7 +380,7 @@ const MockTestRoomPage: React.FC = () => {
 
               <ol className="mt-4 space-y-1.5 text-left text-[14px] text-[#1F2937]">
                 {(['A', 'B', 'C', 'D'] as const).map((letter, idx) => (
-                  <li key={letter} className="text-left">{idx + 1}. {question[`option${letter}` as 'optionA']}</li>
+                  <li key={letter} className="whitespace-pre-wrap text-left">{idx + 1}. {question[`option${letter}` as 'optionA']}</li>
                 ))}
               </ol>
 

@@ -38,11 +38,14 @@ const QuestionImportSchema = new mongoose.Schema({
   },
   validRows: [rowSchema],
   invalidRows: [rowSchema],
+  updateRows: [rowSchema],
   skippedEmpty: { type: Number, default: 0 },
   result: {
     inserted: { type: Number, default: 0 },
     skippedDuplicates: { type: Number, default: 0 },
     rejected: { type: Number, default: 0 },
+    updated: { type: Number, default: 0 },
+    refreshedTests: { type: Number, default: 0 },
   },
   expiresAt: { type: Date },
 }, { timestamps: true });
