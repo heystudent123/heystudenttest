@@ -31,6 +31,30 @@ test('correct, wrong, and blank answers produce marks, accuracy, and time', () =
   assert.equal(result.timeTakenSeconds, 210);
   assert.equal(result.review[2].outcome, 'unanswered');
   assert.equal(result.review[2].correctAnswer, 'C');
+  assert.equal(result.review[0].remarks, '');
+});
+
+test('review includes remarks from the frozen question', () => {
+  const result = scoreAttempt({
+    questions: [
+      {
+        order: 1,
+        question: 'One',
+        optionA: 'A',
+        optionB: 'B',
+        optionC: 'C',
+        optionD: 'D',
+        correctAnswer: 'A',
+        remarks: 'Because A is right.',
+      },
+    ],
+    responses: [{ order: 1, selected: 'A' }],
+    positiveMarks: 5,
+    negativeMarks: 1,
+    startedAt: '2026-10-20T10:00:00.000Z',
+    submittedAt: '2026-10-20T10:00:10.000Z',
+  });
+  assert.equal(result.review[0].remarks, 'Because A is right.');
 });
 
 test('accuracy is zero when nothing was attempted', () => {

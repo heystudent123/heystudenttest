@@ -6,7 +6,6 @@ const {
   parseQuestionWorkbook,
   buildTemplateBuffer,
   contentHash,
-  stemHash,
 } = require('../utils/questionImport');
 const { validateMockTest } = require('../utils/mockTestValidation');
 
@@ -70,31 +69,13 @@ test('missing options and invalid answer letters are reported on the row', () =>
   assert.match(parsed.invalid[0].errors.join(' '), /correct_answer must be A, B, C, or D/);
 });
 
-test('duplicate rows in the file are rejected and exact bank matches are not imported again', () => {
+test('duplicate rows in the file are imported as separate questions', () => {
   const row = validRow();
   const buffer = workbookBuffer([HEADERS, row, [...row]]);
-  const first = parseQuestionWorkbook(buffer);
-  assert.equal(first.valid.length, 1);
-  assert.match(first.invalid[0].errors.join(' '), /Duplicate of spreadsheet row 2/);
-
-  const again = parseQuestionWorkbook(buffer, {
-    contentHashes: new Set([first.valid[0].contentHash]),
-    stemHashes: new Set(),
-  });
-  assert.equal(again.valid.length, 0);
-  assert.match(again.invalid.map((rowItem) => rowItem.errors.join(' ')).join(' '), /already in the question bank/);
-});
-
-test('a conflicting answer already in the bank is rejected', () => {
-  const row = validRow();
-  const options = [row[1], row[2], row[3], row[4]];
-  const buffer = workbookBuffer([HEADERS, row]);
-  const parsed = parseQuestionWorkbook(buffer, {
-    contentHashes: new Set(),
-    stemHashes: new Set([stemHash(row[0], options)]),
-  });
-  assert.equal(parsed.valid.length, 0);
-  assert.match(parsed.invalid[0].errors.join(' '), /different correct answer/);
+  const parsed = parseQuestionWorkbook(buffer);
+  assert.equal(parsed.valid.length, 2);
+  assert.equal(parsed.invalid.length, 0);
+  assert.equal(parsed.valid[0].contentHash, parsed.valid[1].contentHash);
 });
 
 test('content hash changes when the correct letter changes', () => {
@@ -178,45 +159,8 @@ test('line breaks inside question and option cells are kept, spacing is tidied',
   assert.equal(row.chapter, 'Chapter Name');
 });
 
-test('the same question with different line breaks is still a duplicate', () => {
+test('the same question with different line breaks shares a content hash', () => {
   const flat = parseQuestionWorkbook(workbookBuffer([HEADERS, ['List I A. Alpha List II 1. One', 'a', 'b', 'c', 'd', 'A', '', '']]));
   const broken = parseQuestionWorkbook(workbookBuffer([HEADERS, ['List I\nA. Alpha\nList II\n1. One', 'a', 'b', 'c', 'd', 'A', '', '']]));
   assert.equal(flat.valid[0].contentHash, broken.valid[0].contentHash);
-});
-
-test('re-uploading a flattened stored question with line breaks becomes an update, not a duplicate', () => {
-  const brokenText = 'Match List I with List II.' + String.fromCharCode(10) + 'List I:' + String.fromCharCode(10) + 'a. Noun';
-  const flatText = 'Match List I with List II. List I: a. Noun';
-  const options = ['a-i', 'b-ii', 'c-iii', 'd-iv'];
-  const stored = { question: flatText, optionA: options[0], optionB: options[1], optionC: options[2], optionD: options[3] };
-  const hash = contentHash(brokenText, options, 'A');
-  assert.equal(hash, contentHash(flatText, options, 'A'));
-
-  const buffer = workbookBuffer([HEADERS, [brokenText, ...options, 'A', '', '']]);
-  const out = parseQuestionWorkbook(buffer, { contentHashes: new Set([hash]), byHash: new Map([[hash, stored]]) });
-  assert.equal(out.valid.length, 0);
-  assert.equal(out.invalid.length, 0);
-  assert.equal(out.updates.length, 1);
-  assert.equal(out.updates[0].question, brokenText);
-  assert.equal(out.updates[0].contentHash, hash);
-});
-
-test('a flatter upload never overwrites better stored formatting, and unchanged text stays a duplicate', () => {
-  const brokenText = 'Match List I with List II.' + String.fromCharCode(10) + 'List I:' + String.fromCharCode(10) + 'a. Noun';
-  const flatText = 'Match List I with List II. List I: a. Noun';
-  const options = ['a-i', 'b-ii', 'c-iii', 'd-iv'];
-  const hash = contentHash(flatText, options, 'A');
-
-  // stored already has the line breaks; the upload is flat -> must stay a rejected duplicate
-  const storedBroken = { question: brokenText, optionA: options[0], optionB: options[1], optionC: options[2], optionD: options[3] };
-  const flatUpload = workbookBuffer([HEADERS, [flatText, ...options, 'A', '', '']]);
-  const keep = parseQuestionWorkbook(flatUpload, { contentHashes: new Set([hash]), byHash: new Map([[hash, storedBroken]]) });
-  assert.equal(keep.updates.length, 0);
-  assert.equal(keep.invalid.length, 1);
-
-  // identical text -> plain duplicate
-  const storedFlat = { question: flatText, optionA: options[0], optionB: options[1], optionC: options[2], optionD: options[3] };
-  const same = parseQuestionWorkbook(flatUpload, { contentHashes: new Set([hash]), byHash: new Map([[hash, storedFlat]]) });
-  assert.equal(same.updates.length, 0);
-  assert.equal(same.invalid.length, 1);
 });

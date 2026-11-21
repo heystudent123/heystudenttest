@@ -45,8 +45,7 @@ function cleanText(value, maxLen) {
 
 // Question and option text keep the admin's line breaks (Alt+Enter in an Excel
 // cell) so "List I / List II" style questions stay readable. Spaces inside a
-// line are still collapsed, and at most one blank line is kept. Hashing uses
-// normalize() instead, so formatting never creates a false "new" question.
+// line are still collapsed, and at most one blank line is kept.
 const LINE_BREAKS = new RegExp('\r\n|\r|\u2028|\u2029|\u0085', 'g');
 const INLINE_SPACE = new RegExp('[ \t\u00A0]+', 'g');
 
@@ -122,32 +121,11 @@ function isEmptyRow(row) {
   return HEADERS.every((_, index) => normalize(row[index]) === '');
 }
 
-const TEXT_FIELDS = ['question', 'optionA', 'optionB', 'optionC', 'optionD'];
-const countBreaks = (text) => String(text || '').split(String.fromCharCode(10)).length - 1;
-
-// True when the new text has more line breaks than the stored text in at least one field,
-// and never fewer in any. Never lets a flatter upload overwrite better formatting.
-function restoresLineBreaks(stored, next) {
-  let gained = false;
-  for (const field of TEXT_FIELDS) {
-    const before = countBreaks(stored[field]);
-    const after = countBreaks(next[field]);
-    if (after < before) return false;
-    if (after > before) gained = true;
-  }
-  return gained;
-}
-
 /**
  * Parse and validate an Excel buffer.
- * existingStemHashes: Set of stemHash already stored in the question bank.
- * existingContentHashes: Set of exact contentHash already stored.
+ * Duplicate rows are allowed — each bank may hold the same question more than once.
  */
-function parseQuestionWorkbook(buffer, existing = {}) {
-  const existingStem = existing.stemHashes || new Set();
-  const existingContent = existing.contentHashes || new Set();
-  const existingByHash = existing.byHash || new Map();
-
+function parseQuestionWorkbook(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     return { fatal: 'Upload an .xlsx file. The file is empty.' };
   }
@@ -179,9 +157,6 @@ function parseQuestionWorkbook(buffer, existing = {}) {
 
   const valid = [];
   const invalid = [];
-  const updates = [];
-  const seenContent = new Map();
-  const seenStem = new Map();
   let skippedEmpty = 0;
 
   dataRows.forEach((row, index) => {
@@ -216,26 +191,6 @@ function parseQuestionWorkbook(buffer, existing = {}) {
       ? contentHash(question, options, correctRaw)
       : '';
 
-    if (hash && seenContent.has(hash)) {
-      errors.push(`Duplicate of spreadsheet row ${seenContent.get(hash)}.`);
-    }
-    if (stem && seenStem.has(stem) && !seenContent.has(hash)) {
-      errors.push(`Same question and options as row ${seenStem.get(stem)}, with a different correct answer. Keep one row.`);
-    }
-    let formattingUpdate = false;
-    if (hash && existingContent.has(hash)) {
-      // Same question already stored. If this upload carries line breaks the stored copy lost,
-      // treat it as a formatting update instead of a rejected duplicate.
-      const stored = existingByHash.get(hash);
-      if (stored && restoresLineBreaks(stored, { question, optionA, optionB, optionC, optionD })) {
-        formattingUpdate = true;
-      } else {
-        errors.push('This exact question is already in the question bank and will not be imported again.');
-      }
-    } else if (stem && existingStem.has(stem)) {
-      errors.push('The question bank already has this question with a different correct answer. Edit that question instead of importing a second copy.');
-    }
-
     const preview = {
       rowNumber,
       question,
@@ -253,12 +208,6 @@ function parseQuestionWorkbook(buffer, existing = {}) {
       return;
     }
 
-    seenContent.set(hash, rowNumber);
-    seenStem.set(stem, rowNumber);
-    if (formattingUpdate) {
-      updates.push({ ...preview, contentHash: hash, stemHash: stem });
-      return;
-    }
     valid.push({
       ...preview,
       contentHash: hash,
@@ -272,7 +221,7 @@ function parseQuestionWorkbook(buffer, existing = {}) {
     skippedEmpty,
     valid,
     invalid,
-    updates,
+    updates: [],
   };
 }
 
@@ -283,7 +232,7 @@ function buildTemplateBuffer() {
     ['Fill in the Questions sheet. Do not rename the column headers or change their order.'],
     ['Each row is one multiple-choice question. correct_answer must be A, B, C, or D.'],
     ['Delete the example row before you upload real questions.'],
-    ['chapter and remarks are optional. remarks are visible to admins only.'],
+    ['chapter and remarks are optional. remarks are shown as the explanation on the results page.'],
     [`Maximum ${MAX_DATA_ROWS} questions and 2 MB per file.`],
     ['Question text is stored as plain text. Do not put HTML in the cells.'],
   ];
@@ -321,7 +270,6 @@ module.exports = {
   stemHash,
   contentHash,
   cleanMultiline,
-  restoresLineBreaks,
   parseQuestionWorkbook,
   buildTemplateBuffer,
   buildErrorReportBuffer,

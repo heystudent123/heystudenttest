@@ -32,9 +32,29 @@ const QuestionSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-QuestionSchema.index({ contentHash: 1 }, { unique: true });
+// contentHash / stemHash are kept for lookups and repair scripts only —
+// duplicates across (and within) banks are allowed.
+QuestionSchema.index({ contentHash: 1 });
 QuestionSchema.index({ stemHash: 1 });
 QuestionSchema.index({ chapter: 1, createdAt: -1 });
 QuestionSchema.index({ bankId: 1, createdAt: -1 });
 
-module.exports = mongoose.model('Question', QuestionSchema);
+const Question = mongoose.model('Question', QuestionSchema);
+
+let contentHashIndexReady = false;
+Question.ensureNonUniqueContentHash = async function ensureNonUniqueContentHash() {
+  if (contentHashIndexReady) return;
+  contentHashIndexReady = true;
+  try {
+    const indexes = await Question.collection.indexes();
+    const uniqueHash = indexes.find((index) => index.name === 'contentHash_1' && index.unique);
+    if (uniqueHash) {
+      await Question.collection.dropIndex('contentHash_1');
+      await Question.collection.createIndex({ contentHash: 1 });
+    }
+  } catch (_) {
+    // Index may already be non-unique, or the collection may not exist yet.
+  }
+};
+
+module.exports = Question;

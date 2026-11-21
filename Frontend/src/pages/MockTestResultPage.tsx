@@ -15,6 +15,7 @@ interface ReviewItem {
   optionC: string;
   optionD: string;
   chapter: string;
+  remarks?: string;
   selected: string | null;
   correctAnswer: string;
   outcome: 'correct' | 'incorrect' | 'unanswered';
@@ -347,15 +348,24 @@ const MockTestResultPage: React.FC = () => {
                       </div>
                       <p className="mt-2 whitespace-pre-wrap text-[14px] font-semibold leading-relaxed text-[#101828]">{item.question}</p>
                       <div className="mt-3 grid gap-2 text-[13px] sm:grid-cols-2">
-                        <p className={`whitespace-pre-wrap rounded-lg px-3 py-2 ${item.outcome === 'incorrect' ? 'bg-[#FBEFEE] text-[#B3443A]' : item.outcome === 'unanswered' ? 'bg-[#F7F9FC] text-[#64748B]' : 'bg-[#F0FBF4] text-[#2A7D46]'}`}>
+                        <p className={`whitespace-pre-wrap rounded-lg px-3 py-2 ${
+                          item.outcome === 'incorrect'
+                            ? 'bg-[#FBEFEE] text-[#B3443A]'
+                            : item.outcome === 'unanswered'
+                              ? 'bg-[#F1F3F5] text-[#64748B]'
+                              : 'bg-[#EFF8F1] text-[#2A7D46]'
+                        }`}>
                           <span className="font-semibold">Your answer:</span> {optionText(item, item.selected)}
                         </p>
-                        {item.outcome !== 'correct' && (
-                          <p className="whitespace-pre-wrap rounded-lg bg-[#F0FBF4] px-3 py-2 text-[#2A7D46]">
-                            <span className="font-semibold">Correct answer:</span> {optionText(item, item.correctAnswer)}
-                          </p>
-                        )}
+                        <p className="whitespace-pre-wrap rounded-lg bg-[#EFF8F1] px-3 py-2 text-[#2A7D46]">
+                          <span className="font-semibold">Correct answer:</span> {optionText(item, item.correctAnswer)}
+                        </p>
                       </div>
+                      {item.remarks?.trim() ? (
+                        <p className="mt-2 whitespace-pre-wrap rounded-lg bg-[#EFF4FF] px-3 py-2 text-[13px] text-[#1D4ED8]">
+                          <span className="font-semibold">Explanation:</span> {item.remarks.trim()}
+                        </p>
+                      ) : null}
                     </li>
                   );
                 })}

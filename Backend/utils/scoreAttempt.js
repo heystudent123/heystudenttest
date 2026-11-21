@@ -41,6 +41,7 @@ function scoreAttempt({ questions, responses, positiveMarks, negativeMarks, star
       optionC: question.optionC,
       optionD: question.optionD,
       chapter: question.chapter || '',
+      remarks: question.remarks || '',
       selected,
       correctAnswer: question.correctAnswer,
       outcome,

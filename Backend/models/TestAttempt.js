@@ -10,6 +10,7 @@ const questionSchema = new mongoose.Schema({
   optionD: { type: String, required: true },
   correctAnswer: { type: String, enum: ['A', 'B', 'C', 'D'], required: true },
   chapter: { type: String, default: '' },
+  remarks: { type: String, default: '' },
 }, { _id: false });
 
 const responseSchema = new mongoose.Schema({
@@ -27,6 +28,7 @@ const reviewSchema = new mongoose.Schema({
   optionC: String,
   optionD: String,
   chapter: String,
+  remarks: { type: String, default: '' },
   selected: String,
   correctAnswer: String,
   outcome: { type: String, enum: ['correct', 'incorrect', 'unanswered'] },

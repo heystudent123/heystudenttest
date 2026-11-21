@@ -20,6 +20,7 @@ function cloneSnapshot(publishedSnapshot) {
     optionD: question.optionD,
     correctAnswer: question.correctAnswer,
     chapter: question.chapter || '',
+    remarks: question.remarks || '',
   }));
 }
 
@@ -44,7 +45,45 @@ function publicQuestion(question) {
   };
 }
 
-function toClient(attempt) {
+function reviewWithRemarks(attempt) {
+  if (!attempt.result || !attempt.result.review) return attempt.result;
+  const byOrder = new Map((attempt.questions || []).map((question) => [question.order, question]));
+  const result = typeof attempt.result.toObject === 'function' ? attempt.result.toObject() : { ...attempt.result };
+  result.review = (result.review || []).map((item) => {
+    const row = typeof item.toObject === 'function' ? item.toObject() : { ...item };
+    if (row.remarks) return row;
+    const frozen = byOrder.get(row.order);
+    return { ...row, remarks: frozen?.remarks || '' };
+  });
+  return result;
+}
+
+async function enrichReviewFromPublishedSnapshot(attempt, result) {
+  if (!result?.review?.length) return result;
+  const needsLookup = result.review.some((item) => !item.remarks);
+  if (!needsLookup) return result;
+  const test = await MockTest.findById(attempt.mockTestId).select('publishedSnapshot').lean();
+  if (!test?.publishedSnapshot?.length) return result;
+  const byQuestionId = new Map(
+    (test.publishedSnapshot || []).map((question) => [String(question.questionId), question])
+  );
+  const byOrder = new Map(
+    (test.publishedSnapshot || []).map((question) => [question.order, question])
+  );
+  const attemptByOrder = new Map((attempt.questions || []).map((question) => [question.order, question]));
+  return {
+    ...result,
+    review: result.review.map((item) => {
+      if (item.remarks) return item;
+      const frozen = attemptByOrder.get(item.order);
+      const published = (frozen?.questionId && byQuestionId.get(String(frozen.questionId)))
+        || byOrder.get(item.order);
+      return { ...item, remarks: published?.remarks || '' };
+    }),
+  };
+}
+
+function toClient(attempt, resultOverride) {
   const finished = attempt.status !== 'in_progress';
   return {
     _id: attempt._id,
@@ -68,7 +107,7 @@ function toClient(attempt) {
       markedForReview: response.markedForReview,
       visited: response.visited,
     })),
-    result: finished ? attempt.result : undefined,
+    result: finished ? (resultOverride || reviewWithRemarks(attempt)) : undefined,
   };
 }
 
@@ -635,6 +674,7 @@ exports.startPreviewAttempt = async (req, res, next) => {
             optionD: question.optionD,
             correctAnswer: question.correctAnswer,
             chapter: question.chapter || '',
+            remarks: question.remarks || '',
           };
         })
         .filter(Boolean);
@@ -738,7 +778,11 @@ exports.getAttempt = async (req, res, next) => {
     if (attempt.status === 'in_progress' && new Date() >= attempt.deadlineAt) {
       attempt = await finalizeAttempt(attempt, 'timeout');
     }
-    res.status(200).json({ success: true, data: toClient(attempt) });
+    let result;
+    if (attempt.status !== 'in_progress') {
+      result = await enrichReviewFromPublishedSnapshot(attempt, reviewWithRemarks(attempt));
+    }
+    res.status(200).json({ success: true, data: toClient(attempt, result) });
   } catch (err) {
     next(err);
   }
@@ -848,7 +892,8 @@ exports.submitAttempt = async (req, res, next) => {
 
     const requested = ['manual', 'left_screen', 'timeout'].includes(req.body.reason) ? req.body.reason : 'manual';
     const finished = await finalizeAttempt(attempt, requested);
-    res.status(200).json({ success: true, data: toClient(finished) });
+    const result = await enrichReviewFromPublishedSnapshot(finished, reviewWithRemarks(finished));
+    res.status(200).json({ success: true, data: toClient(finished, result) });
   } catch (err) {
     next(err);
   }

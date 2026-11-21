@@ -101,23 +101,9 @@ exports.previewImport = async (req, res, next) => {
     const bank = await QuestionBank.findById(bankId).select('_id');
     if (!bank) return next(new ErrorResponse('Question bank not found.', 404));
 
-    const preliminary = parseQuestionWorkbook(req.file.buffer);
-    if (preliminary.fatal) {
-      return next(new ErrorResponse(preliminary.fatal, 400));
-    }
+    await Question.ensureNonUniqueContentHash();
 
-    const hashes = preliminary.valid.map((row) => row.contentHash);
-    const stems = preliminary.valid.map((row) => row.stemHash);
-    const [exactMatches, stemMatches] = await Promise.all([
-      hashes.length ? Question.find({ contentHash: { $in: hashes } }).select('contentHash question optionA optionB optionC optionD').lean() : [],
-      stems.length ? Question.find({ stemHash: { $in: stems } }).select('stemHash').lean() : [],
-    ]);
-
-    const reviewed = parseQuestionWorkbook(req.file.buffer, {
-      contentHashes: new Set(exactMatches.map((item) => item.contentHash)),
-      stemHashes: new Set(stemMatches.map((item) => item.stemHash)),
-      byHash: new Map(exactMatches.map((item) => [item.contentHash, item])),
-    });
+    const reviewed = parseQuestionWorkbook(req.file.buffer);
     if (reviewed.fatal) {
       return next(new ErrorResponse(reviewed.fatal, 400));
     }
@@ -128,9 +114,9 @@ exports.previewImport = async (req, res, next) => {
       fileName: sanitizeStr(req.file.originalname || '').slice(0, 200),
       validRows: reviewed.valid,
       invalidRows: reviewed.invalid,
-      updateRows: reviewed.updates,
+      updateRows: [],
       skippedEmpty: reviewed.skippedEmpty,
-      result: { inserted: 0, skippedDuplicates: reviewed.invalid.length, rejected: reviewed.invalid.length, updated: 0 },
+      result: { inserted: 0, skippedDuplicates: 0, rejected: reviewed.invalid.length, updated: 0 },
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
 
@@ -141,11 +127,11 @@ exports.previewImport = async (req, res, next) => {
         fileName: record.fileName,
         validCount: reviewed.valid.length,
         invalidCount: reviewed.invalid.length,
-        updateCount: reviewed.updates.length,
+        updateCount: 0,
         skippedEmpty: reviewed.skippedEmpty,
         valid: reviewed.valid,
         invalid: reviewed.invalid,
-        updates: reviewed.updates,
+        updates: [],
       },
     });
   } catch (err) {
@@ -185,12 +171,14 @@ exports.approveImport = async (req, res, next) => {
       return next(new ErrorResponse('This import is already being saved. Retry in a moment.', 409));
     }
 
-    if (!claimed.validRows.length && !(claimed.updateRows || []).length) {
+    if (!claimed.validRows.length) {
       claimed.status = 'pending';
       claimed.approvedBy = undefined;
       await claimed.save();
-      return next(new ErrorResponse('Nothing to import or update. Fix the spreadsheet and upload it again.', 400));
+      return next(new ErrorResponse('Nothing to import. Fix the spreadsheet and upload it again.', 400));
     }
+
+    await Question.ensureNonUniqueContentHash();
 
     const docs = claimed.validRows.map((row) => ({
       bankId: claimed.bankId,
@@ -207,70 +195,24 @@ exports.approveImport = async (req, res, next) => {
       createdBy: req.user._id,
     }));
 
-    const hashes = docs.map((doc) => doc.contentHash);
-    const before = await Question.countDocuments({ contentHash: { $in: hashes } });
+    let inserted = 0;
     try {
-      await Question.insertMany(docs, { ordered: false });
+      const created = await Question.insertMany(docs, { ordered: false });
+      inserted = created.length;
     } catch (err) {
-      const duplicate = err.code === 11000 || err.name === 'MongoBulkWriteError' || err.name === 'BulkWriteError';
-      if (!duplicate) {
-        claimed.status = 'pending';
-        await claimed.save();
-        return next(err);
-      }
-    }
-    const after = await Question.countDocuments({ contentHash: { $in: hashes } });
-    const inserted = Math.max(0, after - before);
-    const skippedDuplicates = docs.length - inserted;
-
-    // Formatting-only updates: a re-upload carrying line breaks the stored copy lost.
-    // Same content hash means same question and same correct answer, so this is cosmetic.
-    // Published tests hold a frozen copy of each question, so refresh that text too.
-    let updated = 0;
-    let refreshedTests = 0;
-    const updateRows = claimed.updateRows || [];
-    if (updateRows.length) {
-      const stored = await Question.find({ contentHash: { $in: updateRows.map((row) => row.contentHash) } }).select("_id contentHash").lean();
-      const idByHash = new Map(stored.map((item) => [item.contentHash, item._id]));
-      const questionOps = [];
-      const testOps = [];
-      const touchedIds = [];
-      updateRows.forEach((row) => {
-        const id = idByHash.get(row.contentHash);
-        if (!id) return;
-        const text = { question: row.question, optionA: row.optionA, optionB: row.optionB, optionC: row.optionC, optionD: row.optionD };
-        touchedIds.push(id);
-        questionOps.push({ updateOne: { filter: { _id: id }, update: { $set: text } } });
-        testOps.push({
-          updateMany: {
-            filter: { "publishedSnapshot.questionId": id },
-            update: { $set: {
-              "publishedSnapshot.$[e].question": text.question,
-              "publishedSnapshot.$[e].optionA": text.optionA,
-              "publishedSnapshot.$[e].optionB": text.optionB,
-              "publishedSnapshot.$[e].optionC": text.optionC,
-              "publishedSnapshot.$[e].optionD": text.optionD,
-            } },
-            arrayFilters: [{ "e.questionId": id }],
-          },
-        });
-      });
-      if (questionOps.length) {
-        refreshedTests = await MockTest.countDocuments({ "publishedSnapshot.questionId": { $in: touchedIds } });
-        const questionResult = await Question.bulkWrite(questionOps, { ordered: false });
-        updated = questionResult.modifiedCount || 0;
-        await MockTest.bulkWrite(testOps, { ordered: false });
-      }
+      claimed.status = 'pending';
+      await claimed.save();
+      return next(err);
     }
 
     claimed.status = 'imported';
     claimed.expiresAt = undefined;
     claimed.result = {
       inserted,
-      skippedDuplicates,
+      skippedDuplicates: 0,
       rejected: claimed.invalidRows.length,
-      updated,
-      refreshedTests,
+      updated: 0,
+      refreshedTests: 0,
     };
     await claimed.save();
 
@@ -278,10 +220,10 @@ exports.approveImport = async (req, res, next) => {
       success: true,
       data: {
         inserted,
-        skippedDuplicates,
+        skippedDuplicates: 0,
         rejected: claimed.invalidRows.length,
-        updated,
-        refreshedTests,
+        updated: 0,
+        refreshedTests: 0,
         alreadyImported: false,
       },
     });
@@ -383,13 +325,11 @@ exports.createQuestion = async (req, res, next) => {
     if (!['A', 'B', 'C', 'D'].includes(correctAnswer)) errors.push('Correct answer must be A, B, C, or D.');
     if (errors.length) return next(new ErrorResponse(errors.join(' '), 400));
 
+    await Question.ensureNonUniqueContentHash();
+
     const options = [optionA, optionB, optionC, optionD];
     const nextContent = contentHash(question, options, correctAnswer);
     const nextStem = stemHash(question, options);
-    const clash = await Question.findOne({ $or: [{ contentHash: nextContent }, { stemHash: nextStem }] }).select('_id');
-    if (clash) {
-      return next(new ErrorResponse('A question with this text and options already exists.', 409));
-    }
 
     const created = await Question.create({
       bankId,
@@ -431,16 +371,11 @@ exports.updateQuestion = async (req, res, next) => {
     if (!['A', 'B', 'C', 'D'].includes(correctAnswer)) errors.push('correct answer must be A, B, C, or D.');
     if (errors.length) return next(new ErrorResponse(errors.join(' '), 400));
 
+    await Question.ensureNonUniqueContentHash();
+
     const options = [optionA, optionB, optionC, optionD];
     const nextContent = contentHash(nextQuestion, options, correctAnswer);
     const nextStem = stemHash(nextQuestion, options);
-    const clash = await Question.findOne({
-      _id: { $ne: question._id },
-      $or: [{ contentHash: nextContent }, { stemHash: nextStem }],
-    }).select('_id');
-    if (clash) {
-      return next(new ErrorResponse('Another question already uses this text and options.', 409));
-    }
 
     question.question = nextQuestion;
     question.optionA = optionA;
@@ -453,6 +388,23 @@ exports.updateQuestion = async (req, res, next) => {
     question.contentHash = nextContent;
     question.stemHash = nextStem;
     await question.save();
+
+    await MockTest.updateMany(
+      { 'publishedSnapshot.questionId': question._id },
+      {
+        $set: {
+          'publishedSnapshot.$[e].question': nextQuestion,
+          'publishedSnapshot.$[e].optionA': optionA,
+          'publishedSnapshot.$[e].optionB': optionB,
+          'publishedSnapshot.$[e].optionC': optionC,
+          'publishedSnapshot.$[e].optionD': optionD,
+          'publishedSnapshot.$[e].correctAnswer': correctAnswer,
+          'publishedSnapshot.$[e].chapter': chapter,
+          'publishedSnapshot.$[e].remarks': remarks,
+        },
+      },
+      { arrayFilters: [{ 'e.questionId': question._id }] }
+    );
 
     res.status(200).json({ success: true, data: question });
   } catch (err) {
